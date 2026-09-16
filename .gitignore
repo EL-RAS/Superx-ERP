@@ -1,0 +1,29 @@
+# Scratch / Temp Files
+.missing_keys.txt
+.placeholder_candidates.txt
+*.log
+*.tmp
+
+# Agents & Local Skills
+.agents/
+
+# Backend (Laravel)
+backend/.env
+backend/vendor/
+backend/storage/*.key
+backend/storage/logs/*
+backend/bootstrap/cache/*
+
+# Frontend (Next.js / Node)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/.env*.local
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Ignore AI Context Files
+AGENTS.md

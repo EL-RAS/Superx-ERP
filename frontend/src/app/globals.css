@@ -1,0 +1,295 @@
+@import "tailwindcss";
+
+:root {
+  /* ── Dark Mode (default) ── */
+  --background: #0A111E;
+  --foreground: #f0f0f2;
+  --card: #111827;
+  --card-foreground: #f0f0f2;
+  --card-hover: #1f2937;
+  --muted: #94a3b8;
+  --muted-foreground: #94a3b8;
+  --border: #1e293b;
+  --border-hover: #334155;
+  --input: #1e293b;
+  --accent: #D49A37;
+  --accent-dim: rgba(212, 154, 55, 0.1);
+  --primary: #1E4E8C;
+  --primary-light: #3A75C4;
+  --primary-dark: #0F2A4A;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+  --gold: #D49A37;
+  --gold-light: #F3C87A;
+  --gold-dark: #B87B28;
+  --navy: #1E4E8C;
+  --navy-light: #3A75C4;
+  --navy-dark: #0F2A4A;
+  --surface-elevated: rgba(17, 24, 39, 0.8);
+}
+
+.light {
+  --background: #F8FAFC;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --card-hover: #f1f5f9;
+  --muted: #475569;
+  --muted-foreground: #475569;
+  --border: #e2e8f0;
+  --border-hover: #cbd5e1;
+  --input: #e2e8f0;
+  --accent: #A16207;
+  --accent-dim: rgba(161, 98, 7, 0.09);
+  --primary: #1E4E8C;
+  --primary-light: #3A75C4;
+  --primary-dark: #0F2A4A;
+  --success: #059669;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --info: #2563eb;
+  --gold: #A16207;
+  --gold-light: #B45309;
+  --gold-dark: #7C4A03;
+  --navy: #1E4E8C;
+  --navy-light: #3A75C4;
+  --navy-dark: #0F2A4A;
+  --surface-elevated: rgba(255, 255, 255, 0.9);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-card-hover: var(--card-hover);
+  --color-border: var(--border);
+  --color-border-hover: var(--border-hover);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-input: var(--input);
+  --color-accent: var(--accent);
+  --color-accent-dim: var(--accent-dim);
+  --color-primary: var(--primary);
+  --color-primary-light: var(--primary-light);
+  --color-primary-dark: var(--primary-dark);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-gold: var(--gold);
+  --color-gold-light: var(--gold-light);
+  --color-gold-dark: var(--gold-dark);
+  --color-navy: var(--navy);
+  --color-navy-light: var(--navy-light);
+  --color-navy-dark: var(--navy-dark);
+  --color-surface-elevated: var(--surface-elevated);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.glass {
+  background: var(--surface-elevated);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+}
+
+.glass-hover:hover {
+  background: var(--card-hover);
+  border-color: var(--border-hover);
+}
+
+.glow-border {
+  position: relative;
+}
+.glow-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(212,154,55,0.3), transparent 50%, rgba(30,78,140,0.15));
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.glow-border:hover::before {
+  opacity: 1;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--card) 25%, var(--card-hover) 50%, var(--card) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 154, 55, 0); }
+  50% { box-shadow: 0 0 20px 4px rgba(212, 154, 55, 0.15); }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 6s ease infinite;
+}
+
+/* ── Print stylesheet ────────────────────────────────── */
+@media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  /* Hide app chrome: sidebar, top bar, and the page body margin. */
+  aside,
+  header {
+    display: none !important;
+  }
+  .ml-64,
+  .ms-64,
+  [class*="ms-64"] {
+    margin-inline-start: 0 !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Clean white, high-contrast layout for report content. */
+  html,
+  body {
+    background: #ffffff !important;
+  }
+  body {
+    color: #000000 !important;
+  }
+  .glass,
+  .bg-card,
+  [class*="bg-card/"] {
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-color: #d1d5db !important;
+    box-shadow: none !important;
+  }
+  .text-foreground {
+    color: #000000 !important;
+  }
+  .text-muted {
+    color: #374151 !important;
+  }
+  .text-emerald-400,
+  .text-red-400,
+  .text-primary-light,
+  .text-accent {
+    color: #000000 !important;
+  }
+  .border-border,
+  .border {
+    border-color: #d1d5db !important;
+  }
+  .print-area {
+    width: 100% !important;
+  }
+  .print-area .grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  /* Z-Report modal print: hide the app, keep only the report paper. */
+  body.print-z-report > *:not([data-zreport-portal]) {
+    display: none !important;
+  }
+  body.print-z-report {
+    background: #ffffff !important;
+  }
+  body.print-z-report .zreport-overlay {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  body.print-z-report .zreport-container {
+    position: absolute;
+    inset: 0;
+    padding: 0;
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+  body.print-z-report .zreport-panel {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  body.print-z-report #z-report-print {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+  body.print-z-report #z-report-print > div {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* POS thermal receipt print: hide the app chrome, keep only the paper. */
+  body.pos-receipt-print {
+    background: #ffffff !important;
+  }
+  body.pos-receipt-print * {
+    visibility: hidden !important;
+  }
+  body.pos-receipt-print .receipt-print-area,
+  body.pos-receipt-print .receipt-print-area * {
+    visibility: visible !important;
+  }
+  body.pos-receipt-print .receipt-print-area {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
