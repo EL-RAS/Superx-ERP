@@ -17,10 +17,10 @@
 | ![POS Screen](docs/assets/pos-preview.png) | ![Dashboard Screen](docs/assets/dashboard-preview.png) |
 | *Fast POS interface and barcode scale reading* | *Dashboard and real-time financial reports* |
 
-| **FEFO Inventory & Batches** | **Multi-Tenant Administration** |
+| **FEFO Inventory & Batches** | **System Reports** |
 | :---: | :---: |
-| ![Inventory Screen](docs/assets/inventory-preview.png) | ![Tenants Screen](docs/assets/tenants-preview.png) |
-| *Batch tracking, expiry dates, and reconciliation* | *Tenant and subdomain management* |
+| ![Inventory Screen](docs/assets/inventory-preview.png) | ![Reports Screen](docs/assets/reports-preview.png) |
+| *Batch tracking, expiry dates, and reconciliation* | *Comprehensive system and financial reports* |
 
 ---
 
@@ -155,6 +155,12 @@ cd backend
 php artisan config:clear
 DB_CONNECTION=pgsql DB_DATABASE=superx_erp_test vendor/bin/phpunit
 ```
+
+---
+
+## 👨‍💻 Developer
+
+Developed with ❤️ by **ALi EL-Ras**.
 
 ---
 
