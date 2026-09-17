@@ -18,6 +18,8 @@ use App\Models\Warehouse;
 use App\Rules\ProductQuantity;
 use App\Services\AccountingService;
 use App\Services\DocumentNumberService;
+use App\Services\StockService;
+use App\Services\TaxCalculator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -297,8 +299,7 @@ class ReturnExchangeController extends Controller
 
         if ($batch) {
             $batch->decrement('quantity_sold', $qty);
-            $product->fresh()->recalculateStockQuantity();
-            $product->fresh()->updateWeightedAverageCost();
+            $product->fresh()->refreshMetrics();
         } else {
             $product->increment('stock_quantity', $qty);
         }
@@ -410,7 +411,7 @@ class ReturnExchangeController extends Controller
             $unitPrice = (float) $item['unit_price'];
             $taxRate = (float) ($item['tax_rate'] ?? $product->tax_rate ?? 0);
             $lineTotal = round($qty * $unitPrice, 2);
-            $lineTax = round($lineTotal * ($taxRate / 100), 2);
+            $lineTax = round(TaxCalculator::line($lineTotal, $taxRate, false)['tax'], 2);
 
             $subtotal += $lineTotal;
             $totalTax += $lineTax;
@@ -428,26 +429,9 @@ class ReturnExchangeController extends Controller
                 'total' => round($lineTotal + $lineTax, 2),
             ]);
 
-            $deductions = [];
+            $deductions = StockService::deductForSale($product, $qty, $businessId);
             if ($product->has_batch) {
-                $available = ProductBatch::getAvailableFefoStock((int) $product->id, $businessId);
-                if ((float) $available < $qty) {
-                    throw new \RuntimeException(
-                        "Insufficient batch stock for {$product->name}. Available: {$available}, requested: {$qty}."
-                    );
-                }
-                $deductions = ProductBatch::deductFefo((int) $product->id, $businessId, $qty);
                 $invoiceItem->update(['metadata' => ['deductions' => $deductions]]);
-                $product->fresh()->recalculateStockQuantity();
-                $product->fresh()->updateWeightedAverageCost();
-                $product->fresh()->autoPrice();
-            } else {
-                if ((float) $product->stock_quantity < $qty) {
-                    throw new \RuntimeException(
-                        "Insufficient stock for {$product->name}. Available: {$product->stock_quantity}, requested: {$qty}."
-                    );
-                }
-                $product->decrement('stock_quantity', $qty);
             }
 
             StockMovement::create([

@@ -1305,10 +1305,23 @@ export default function POSPage() {
       <AnimatePresence>
         {receipt && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setReceipt(null)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setReceipt(null)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 print:hidden" />
             <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
               <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
                 className={`glass rounded-2xl p-6 w-full ${receiptPaperWidth === "58mm" ? "max-w-[220px]" : "max-w-sm"} space-y-4 receipt-print-area`}>
+                <div className="flex flex-col items-center gap-1">
+                  {config?.logo && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={config.logo}
+                      alt={business?.name ?? t("pos.payment_successful")}
+                      className="max-h-[50px] w-auto object-contain"
+                    />
+                  )}
+                  <div className="text-sm font-semibold text-center text-foreground">
+                    {business?.name ?? config?.business_name ?? ""}
+                  </div>
+                </div>
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
                     <Check className="w-5 h-5 text-emerald-400" />
@@ -1352,7 +1365,7 @@ export default function POSPage() {
                 <div className="text-xs text-muted text-center">
                   {t("pos.items", { count: String(receipt.items?.length ?? 0) })} &middot; {t(`pos.${payMethod}`)}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 print:hidden">
                   <button
                     onClick={() => {
                       document.body.classList.add("pos-receipt-print");

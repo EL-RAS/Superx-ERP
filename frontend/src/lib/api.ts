@@ -41,20 +41,7 @@ import {
   CampaignStats,
   CustomerSegments,
   Promotion,
-  RestaurantTable,
-  Reservation,
-  KitchenOrder,
   Recipe,
-  Appointment,
-  DentalChart,
-  TreatmentPlan,
-  MedicalRecord,
-  Prescription,
-  LabOrder,
-  InsuranceClaim,
-  GoldRateLog,
-  RepairTicket,
-  PoliceBookEntry,
   Shift,
   InventoryAdjustment,
   ZReport,
@@ -84,6 +71,7 @@ import {
   PromotionApplyResult,
   SupplierLedger,
 } from "./types";
+import { removeAuthCookie } from "@/lib/cookie";
 
 export type {
   BusinessTypeItem,
@@ -117,6 +105,15 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== "undefined") {
+      localStorage.removeItem("sx_token");
+      localStorage.removeItem("sx_user");
+      localStorage.removeItem("sx_business");
+      removeAuthCookie();
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
+    }
     throw new ApiError(data?.message || "Request failed", res.status, data?.errors);
   }
   return data;
@@ -295,10 +292,6 @@ export async function fetchTenantDashboard(token: string, businessId: string): P
   return apiFetch(`${API_BASE}/tenant/dashboard`, { headers: authHeaders(token, businessId) });
 }
 
-export async function fetchDashboardStats(token: string, businessId: string): Promise<DashboardStats> {
-  return apiFetch(`${API_BASE}/dashboard/stats`, { headers: authHeaders(token, businessId) });
-}
-
 export async function fetchSupermarketDashboard(token: string, businessId: string): Promise<SupermarketDashboardStats> {
   return apiFetch(`${API_BASE}/dashboard/supermarket`, { headers: authHeaders(token, businessId) });
 }
@@ -344,19 +337,6 @@ export const api = {
   recipes: <const>"recipes",
   shifts: <const>"shifts",
   inventoryAdjustments: <const>"inventory-adjustments",
-  appointments: <const>"clinic/appointments",
-  dentalCharts: <const>"clinic/dental-charts",
-  treatmentPlans: <const>"clinic/treatment-plans",
-  medicalRecords: <const>"clinic/medical-records",
-  prescriptions: <const>"clinic/prescriptions",
-  labOrders: <const>"clinic/lab-orders",
-  insuranceClaims: <const>"clinic/insurance-claims",
-  tables: <const>"restaurant/tables",
-  reservations: <const>"restaurant/reservations",
-  kitchenOrders: <const>"restaurant/kitchen-orders",
-  goldRateLogs: <const>"jewelry/gold-rate-logs",
-  repairTickets: <const>"jewelry/repair-tickets",
-  policeBookEntries: <const>"jewelry/police-book-entries",
   fiscalYears: <const>"fiscal-years",
   bankReconciliations: <const>"bank-reconciliations",
   warehouses: <const>"warehouses",
@@ -532,19 +512,6 @@ export const Promotions = createResource<Promotion>(api.promotions);
 export const Recipes = createResource<Recipe>(api.recipes);
 export const Shifts = createResource<Shift>(api.shifts);
 export const InventoryAdjustments = createResource<InventoryAdjustment>(api.inventoryAdjustments);
-export const Appointments = createResource<Appointment>(api.appointments);
-export const DentalCharts = createResource<DentalChart>(api.dentalCharts);
-export const TreatmentPlans = createResource<TreatmentPlan>(api.treatmentPlans);
-export const MedicalRecords = createResource<MedicalRecord>(api.medicalRecords);
-export const Prescriptions = createResource<Prescription>(api.prescriptions);
-export const LabOrders = createResource<LabOrder>(api.labOrders);
-export const InsuranceClaims = createResource<InsuranceClaim>(api.insuranceClaims);
-export const Tables = createResource<RestaurantTable>(api.tables);
-export const Reservations = createResource<Reservation>(api.reservations);
-export const KitchenOrders = createResource<KitchenOrder>(api.kitchenOrders);
-export const GoldRateLogs = createResource<GoldRateLog>(api.goldRateLogs);
-export const RepairTickets = createResource<RepairTicket>(api.repairTickets);
-export const PoliceBookEntries = createResource<PoliceBookEntry>(api.policeBookEntries);
 export const FiscalYears = createResource<FiscalYear>(api.fiscalYears);
 export const BankReconciliations = createResource<BankReconciliation>(api.bankReconciliations);
 export const Warehouses = createResource<Warehouse>(api.warehouses);
@@ -589,9 +556,6 @@ export function fetchCustomerStatement(token: string, bizId: string, customerId:
 // ─── Loyalty (custom endpoints) ────────────────────────
 export function fetchLoyaltyCards(token: string, bizId: string, params?: Record<string, string | number>) {
   return apiFetch<PaginatedResponse<LoyaltyCard>>(`${API_BASE}/loyalty/cards${qs(params || {})}`, { headers: authHeaders(token, bizId) });
-}
-export function fetchLoyaltyCard(token: string, bizId: string, id: number | string) {
-  return apiFetch<LoyaltyCard>(`${API_BASE}/loyalty/cards/${id}`, { headers: authHeaders(token, bizId) });
 }
 export function createLoyaltyCard(token: string, bizId: string, data: Record<string, unknown>) {
   return apiFetch<LoyaltyCard>(`${API_BASE}/loyalty/cards`, {
@@ -729,22 +693,6 @@ export function autoWasteExpiredBatches(token: string, bizId: string, dryRun?: b
   });
 }
 
-// ─── Batch Sell / Adjust ──────────────────────────────
-export function sellBatch(token: string, bizId: string, batchId: number | string, quantity: number) {
-  return apiFetch<ProductBatch>(`${API_BASE}/product-batches/${batchId}/sell`, {
-    method: "POST",
-    headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" },
-    body: JSON.stringify({ quantity }),
-  });
-}
-export function adjustBatch(token: string, bizId: string, batchId: number | string, quantity_adjusted: number, reason?: string) {
-  return apiFetch<ProductBatch>(`${API_BASE}/product-batches/${batchId}/adjust`, {
-    method: "POST",
-    headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" },
-    body: JSON.stringify({ quantity_adjusted, reason }),
-  });
-}
-
 // ─── Journal Entry Actions ────────────────────────────
 export function postJournalEntry(token: string, bizId: string, id: number | string) {
   return apiFetch<JournalEntry>(`${API_BASE}/journal-entries/${id}/post`, {
@@ -851,20 +799,6 @@ export function importBankStatement(token: string, bizId: string, id: number | s
   });
 }
 
-// ─── Active Promotions ────────────────────────────────
-export function fetchActivePromotions(token: string, bizId: string) {
-  return apiFetch<PaginatedResponse<Promotion>>(`${API_BASE}/promotions${qs({ is_active: "1" })}`, { headers: authHeaders(token, bizId) });
-}
-
-// ─── Serial Number Sell ────────────────────────────────
-export function sellSerialNumber(token: string, bizId: string, id: number | string, customerId: number) {
-  return apiFetch<SerialNumber>(`${API_BASE}/serial-numbers/sell/${id}`, {
-    method: "POST",
-    headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" },
-    body: JSON.stringify({ customer_id: customerId }),
-  });
-}
-
 // ─── Invoice Actions ──────────────────────────────────
 export function payInvoice(token: string, bizId: string, invoiceId: number | string, data: { amount: number; method: string; reference_number?: string; notes?: string }) {
   return apiFetch<{ payment: Payment; invoice: Invoice }>(`${API_BASE}/invoices/${invoiceId}/pay`, {
@@ -886,15 +820,6 @@ export function duplicateInvoice(token: string, bizId: string, invoiceId: number
   });
 }
 
-// ─── Payment Actions ──────────────────────────────────
-export function refundPayment(token: string, bizId: string, paymentId: number | string, data: { amount: number; notes?: string }) {
-  return apiFetch<Payment>(`${API_BASE}/payments/${paymentId}/refund`, {
-    method: "POST",
-    headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-}
-
 // ─── Status update helpers ─────────────────────────────
 export function updateWarrantyClaimStatus(token: string, bizId: string, id: number | string, status: string) {
   return apiFetch<WarrantyClaim>(`${API_BASE}/warranty-claims/${id}/status`, {
@@ -903,46 +828,6 @@ export function updateWarrantyClaimStatus(token: string, bizId: string, id: numb
 }
 export function updateServiceTicketStatus(token: string, bizId: string, id: number | string, status: string) {
   return apiFetch<ServiceTicket>(`${API_BASE}/service-tickets/${id}/status`, {
-    method: "PATCH", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify({ status }),
-  });
-}
-export function updateKitchenOrderStatus(token: string, bizId: string, id: number | string, status: string) {
-  return apiFetch<KitchenOrder>(`${API_BASE}/restaurant/kitchen-orders/${id}/status`, {
-    method: "PATCH", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify({ status }),
-  });
-}
-export function updateTableStatus(token: string, bizId: string, id: number | string, status: string) {
-  return apiFetch<RestaurantTable>(`${API_BASE}/restaurant/tables/${id}/status`, {
-    method: "PATCH", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify({ status }),
-  });
-}
-export function updateReservationStatus(token: string, bizId: string, id: number | string, status: string) {
-  return apiFetch<Reservation>(`${API_BASE}/restaurant/reservations/${id}/status`, {
-    method: "PATCH", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify({ status }),
-  });
-}
-export function updateAppointmentStatus(token: string, bizId: string, id: number | string, status: string) {
-  return apiFetch<Appointment>(`${API_BASE}/clinic/appointments/${id}/status`, {
-    method: "PATCH", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify({ status }),
-  });
-}
-export function updateTreatmentProcedureStatus(token: string, bizId: string, id: number | string, status: string) {
-  return apiFetch<{ id: number; status: string }>(`${API_BASE}/clinic/treatment-procedures/${id}/status`, {
-    method: "PATCH", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify({ status }),
-  });
-}
-export function updateLabOrderResults(token: string, bizId: string, id: number | string, results: string) {
-  return apiFetch<LabOrder>(`${API_BASE}/clinic/lab-orders/${id}/results`, {
-    method: "PATCH", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify({ results }),
-  });
-}
-export function updateInsuranceClaimStatus(token: string, bizId: string, id: number | string, status: string) {
-  return apiFetch<InsuranceClaim>(`${API_BASE}/clinic/insurance-claims/${id}/status`, {
-    method: "PATCH", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify({ status }),
-  });
-}
-export function updateRepairTicketStatus(token: string, bizId: string, id: number | string, status: string) {
-  return apiFetch<RepairTicket>(`${API_BASE}/jewelry/repair-tickets/${id}/status`, {
     method: "PATCH", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify({ status }),
   });
 }
@@ -993,52 +878,10 @@ export async function quickAddProduct(token: string, bizId: string, payload: Qui
   });
 }
 
-// ─── Jewelry Gold Rate ─────────────────────────────────
-export function fetchLatestGoldRate(token: string, bizId: string) {
-  return apiFetch<PaginatedResponse<GoldRateLog>>(`${API_BASE}/jewelry/gold-rate-logs`, { headers: authHeaders(token, bizId) });
-}
-export function fetchGoldRate(token: string, bizId: string) {
-  return apiFetch<{ rate: number; currency: string }>(`${API_BASE}/jewelry/gold-rate`, { headers: authHeaders(token, bizId) });
-}
-
-// ─── Dental Charts Patient ─────────────────────────────
-export function fetchPatientDentalChart(token: string, bizId: string, customerId: number) {
-  return apiFetch<PaginatedResponse<DentalChart>>(`${API_BASE}/clinic/dental-charts/patient/${customerId}`, {
-    headers: authHeaders(token, bizId),
-  });
-}
-export function bulkStoreDentalCharts(token: string, bizId: string, data: Record<string, unknown>) {
-  return apiFetch<DentalChart[]>(`${API_BASE}/clinic/dental-charts/bulk`, {
-    method: "POST", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify(data),
-  });
-}
-
 // ─── Supermarket: Promotion Engine ─────────────────────
 export function applyPromotions(token: string, bizId: string, data: { items: { product_id: number; quantity: number; unit_price: number }[]; customer_id?: number; local_time?: string }) {
   return apiFetch<PromotionApplyResult>(
     `${API_BASE}/promotions/apply`, {
-      method: "POST", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify(data),
-    }
-  );
-}
-
-// ─── Supermarket: FEFO Batch Sell ─────────────────────
-export function sellBatchFefo(token: string, bizId: string, data: { product_id: number; quantity: number }) {
-  return apiFetch<{ product_id: number; total_sold: number; batches: { batch_id: number; batch_number: string; expiry_date: string; quantity_sold: number }[] }>(
-    `${API_BASE}/product-batches/sell-fefo`, {
-      method: "POST", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify(data),
-    }
-  );
-}
-
-// ─── Supermarket: GRN Receive ─────────────────────────
-export function grnReceive(token: string, bizId: string, data: {
-  purchase_order_id?: number;
-  supplier_id?: number;
-  items: { product_id: number; quantity: number; batch_number: string; expiry_date: string; cost_per_unit: number; selling_price?: number; manufacturing_date?: string; storage_location?: string }[];
-}) {
-  return apiFetch<{ message: string; batches: ProductBatch[]; count: number }>(
-    `${API_BASE}/product-batches/grn-receive`, {
       method: "POST", headers: { ...authHeaders(token, bizId), "Content-Type": "application/json" }, body: JSON.stringify(data),
     }
   );

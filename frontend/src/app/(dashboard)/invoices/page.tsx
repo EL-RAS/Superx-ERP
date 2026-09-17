@@ -17,6 +17,7 @@ import { useI18n } from "@/lib/i18n";
 import { quantityStep } from "@/lib/product";
 import { usePagination } from "@/lib/pagination";
 import { hasPermission } from "@/lib/rbac";
+import { round2 } from "@/lib/math";
 import { FileText, Plus, X, Copy, Send, Ban, CreditCard, Loader2, Search } from "lucide-react";
 
 const statusTabs = ["all", "paid", "unpaid", "partial", "void"] as const;
@@ -31,10 +32,6 @@ interface InvoiceFormData {
 }
 
 const emptyItem = { product_id: "", name: "", quantity: "1", unit_price: "0", discount: "0", tax_rate: "0", is_weighable: false, unit: null };
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
 
 export default function InvoicesPage() {
   const { token, business, config } = useAuthStore();

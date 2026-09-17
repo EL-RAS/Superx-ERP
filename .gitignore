@@ -27,3 +27,4 @@ Thumbs.db
 
 # Ignore AI Context Files
 AGENTS.md
+skills-lock.json

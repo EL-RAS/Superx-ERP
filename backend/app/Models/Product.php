@@ -178,4 +178,16 @@ class Product extends Model
             $this->update(['price' => round((float) $this->cost * 3, 2)]);
         }
     }
+
+    /**
+     * Convenience shortcut that refreshes all three derived metrics
+     * (stock quantity, weighted-average cost, and auto-price) in one call.
+     * Replaces the repeated triple-call pattern across controllers.
+     */
+    public function refreshMetrics(): void
+    {
+        $this->recalculateStockQuantity();
+        $this->updateWeightedAverageCost();
+        $this->autoPrice();
+    }
 }

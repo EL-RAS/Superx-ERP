@@ -36,6 +36,8 @@ class Shift extends Model
         'metadata',
     ];
 
+    protected $appends = ['cashier'];
+
     protected function casts(): array
     {
         return [
@@ -64,6 +66,11 @@ class Shift extends Model
         return $this->belongsTo(User::class);
     }
 
+    public function getCashierAttribute(): ?string
+    {
+        return $this->user?->name;
+    }
+
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
@@ -88,10 +95,12 @@ class Shift extends Model
         return $query->where('status', 'open');
     }
 
-    public function close(float $actualCash, array $paymentBreakdown, float $cashRefunds = 0): void
+    public function close(float $actualCash, array $paymentBreakdown, float $cashRefunds = 0, ?float $expectedCash = null): void
     {
-        $cashSales = (float) ($paymentBreakdown['cash'] ?? 0);
-        $expectedCash = round((float) $this->opening_balance + $cashSales - $cashRefunds, 2);
+        if ($expectedCash === null) {
+            $cashSales = (float) ($paymentBreakdown['cash'] ?? 0);
+            $expectedCash = round((float) $this->opening_balance + $cashSales - $cashRefunds, 2);
+        }
 
         $this->update([
             'status' => 'closed',
@@ -99,7 +108,7 @@ class Shift extends Model
             'closing_balance' => $actualCash,
             'expected_cash' => $expectedCash,
             'actual_cash' => $actualCash,
-            'variance' => round($actualCash - $expectedCash, 2),
+            'variance' => round($actualCash - (float) $expectedCash, 2),
             'payment_breakdown' => $paymentBreakdown,
         ]);
     }

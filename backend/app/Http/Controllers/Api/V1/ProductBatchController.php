@@ -8,11 +8,11 @@ use App\Models\InventoryAdjustment;
 use App\Models\Product;
 use App\Models\ProductBatch;
 use App\Models\PurchaseOrder;
-use App\Models\PurchaseOrderItem;
 use App\Models\PurchaseOrderPayment;
 use App\Models\StockMovement;
 use App\Rules\ProductQuantity;
 use App\Services\AccountingService;
+use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -122,10 +122,7 @@ class ProductBatchController extends Controller
         $batch = ProductBatch::create($validated);
 
         $batch->load('product');
-        $product = $batch->product;
-        $product?->recalculateStockQuantity();
-        $product?->updateWeightedAverageCost();
-        $product?->autoPrice();
+        $batch->product?->refreshMetrics();
 
         if ((float) $batch->total_cost > 0) {
             app(AccountingService::class)->postGoodsReceiptEntry(
@@ -145,6 +142,169 @@ class ProductBatchController extends Controller
         }
 
         return response()->json($batch, 201);
+    }
+
+    public function grnReceive(Request $request): JsonResponse
+    {
+        $businessId = $request->user()->business_id;
+
+        $validated = $request->validate([
+            'purchase_order_id' => 'nullable|exists:purchase_orders,id',
+            'supplier_id' => 'nullable|exists:suppliers,id',
+            'payment_method' => 'nullable|string|in:cash,bank,credit',
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.quantity' => ['required', 'numeric', 'min:0.01', ProductQuantity::forItems(fn (string $attribute) => $request->input(str_replace('.quantity', '.product_id', $attribute)))],
+            'items.*.batch_number' => ['required', 'string', Rule::unique('product_batches', 'batch_number')->where(fn ($query) => $query->where('business_id', $businessId))],
+            'items.*.expiry_date' => 'nullable|date',
+            'items.*.manufacturing_date' => 'nullable|date',
+            'items.*.storage_location' => 'nullable|string|max:255',
+            'items.*.total_cost' => 'nullable|numeric|min:0',
+        ]);
+
+        return DB::transaction(function () use ($request, $validated, $businessId) {
+            $po = ! empty($validated['purchase_order_id'])
+                ? PurchaseOrder::findOrFail($validated['purchase_order_id'])
+                : null;
+
+            if ($po && ! in_array($po->status, ['ordered', 'partially_received'], true)) {
+                throw new InsufficientStockException(
+                    "Cannot receive purchase order {$po->order_number}: only 'ordered' or 'partially received' orders can be received (currently '{$po->status}')."
+                );
+            }
+
+            $supplierId = $validated['supplier_id'] ?? $po?->supplier_id;
+            $poItems = $po ? $po->items()->get() : collect();
+
+            $totalCost = 0;
+            $createdBatchIds = [];
+            $updatedProducts = [];
+
+            foreach ($validated['items'] as $item) {
+                $product = Product::findOrFail($item['product_id']);
+                $baseQty = round((float) $item['quantity'], 2);
+                $unitCost = isset($item['total_cost'])
+                    ? round((float) $item['total_cost'] / max($baseQty, 0.0001), 4)
+                    : (float) ($product->cost ?? 0);
+                $itemTotal = round($baseQty * $unitCost, 2);
+
+                if ($po) {
+                    $poItem = $poItems->firstWhere('product_id', (int) $item['product_id']);
+
+                    if (! $poItem) {
+                        throw new InsufficientStockException(
+                            "Product {$product->name} is not on purchase order {$po->order_number}."
+                        );
+                    }
+
+                    if ((float) $poItem->quantity > 0
+                        && (float) $poItem->received_quantity + $baseQty > (float) $poItem->quantity + 0.001) {
+                        throw new InsufficientStockException(
+                            "Cannot receive more than the ordered quantity for {$poItem->name}. Ordered: {$poItem->quantity}."
+                        );
+                    }
+
+                    $poItem->increment('received_quantity', $baseQty);
+                }
+
+                if ($product->has_batch) {
+                    if (empty($item['expiry_date'])) {
+                        throw new InsufficientStockException(
+                            "Expiry date is required for batch-managed product {$product->name}."
+                        );
+                    }
+
+                    $batch = ProductBatch::create([
+                        'business_id' => $businessId,
+                        'product_id' => $product->id,
+                        'batch_number' => $item['batch_number'],
+                        'source_type' => 'goods_receipt',
+                        'supplier_id' => $supplierId,
+                        'quantity' => $baseQty,
+                        'received_date' => now()->toDateString(),
+                        'expiry_date' => $item['expiry_date'],
+                        'manufacturing_date' => $item['manufacturing_date'] ?? null,
+                        'storage_location' => $item['storage_location'] ?? null,
+                        'cost_per_unit' => round($unitCost, 2),
+                        'total_cost' => $itemTotal,
+                        'is_active' => true,
+                        'metadata' => $po
+                            ? ['purchase_order_id' => $po->id]
+                            : ['direct' => true],
+                    ]);
+                    $createdBatchIds[] = $batch->id;
+                    $updatedProducts[] = $product->id;
+                } else {
+                    $oldStock = (float) $product->stock_quantity;
+                    $oldCost = (float) $product->cost;
+                    $blended = $oldStock > 0
+                        ? (($oldStock * $oldCost) + ($baseQty * $unitCost)) / ($oldStock + $baseQty)
+                        : $unitCost;
+                    $product->increment('stock_quantity', $baseQty);
+                    $product->update(['cost' => round($blended, 2)]);
+                    $product->autoPrice();
+                }
+
+                $totalCost += $itemTotal;
+            }
+
+            if ($po) {
+                $fullyReceived = $poItems->filter(fn ($poItem) => (float) $poItem->received_quantity < (float) $poItem->quantity)->isEmpty();
+                $po->update(array_filter([
+                    'status' => $fullyReceived ? 'received' : 'partially_received',
+                    'received_at' => $fullyReceived ? now() : null,
+                ]));
+            }
+
+            foreach (array_unique($updatedProducts) as $productId) {
+                $product = Product::find($productId);
+                if ($product) {
+                    $product->refreshMetrics();
+                }
+            }
+
+            if ($totalCost > 0 && ! empty($createdBatchIds)) {
+                app(AccountingService::class)->postGoodsReceiptEntry(
+                    $businessId,
+                    $totalCost,
+                    $createdBatchIds[0],
+                    $request->user()->id,
+                    $po ? 'Goods received - '.$po->order_number : 'Goods received',
+                    array_filter([
+                        'purchase_order_id' => $po?->id,
+                        'batch_ids' => $createdBatchIds,
+                    ]),
+                    'credit'
+                );
+            }
+
+            if (in_array($validated['payment_method'] ?? null, ['cash', 'bank'], true)) {
+                $payment = PurchaseOrderPayment::create([
+                    'business_id' => $businessId,
+                    'user_id' => $request->user()->id,
+                    'purchase_order_id' => $po?->id,
+                    'supplier_id' => $supplierId,
+                    'payment_number' => 'POPAY-'.strtoupper(Str::random(8)),
+                    'amount' => $totalCost,
+                    'method' => $validated['payment_method'],
+                    'reference_number' => $po ? 'GRN-'.$po->order_number : null,
+                    'status' => 'completed',
+                    'metadata' => ['source' => 'grn_receive'],
+                ]);
+
+                $payment->load(['purchaseOrder:id,order_number', 'supplier:id,name', 'user:id,name']);
+
+                app(AccountingService::class)->postSupplierPaymentEntry($businessId, $payment, $request->user()->id);
+            }
+
+            return response()->json([
+                'message' => 'Goods received successfully.',
+                'batches' => ProductBatch::withoutGlobalScopes()
+                    ->where('business_id', $businessId)
+                    ->whereIn('id', $createdBatchIds)
+                    ->get(),
+            ], 201);
+        });
     }
 
     public function show(ProductBatch $productBatch): JsonResponse
@@ -198,10 +358,7 @@ class ProductBatchController extends Controller
         $productBatch->update($validated);
 
         $productBatch->load('product');
-        $product = $productBatch->product;
-        $product?->recalculateStockQuantity();
-        $product?->updateWeightedAverageCost();
-        $product?->autoPrice();
+        $productBatch->product?->refreshMetrics();
 
         return response()->json($productBatch);
     }
@@ -222,9 +379,7 @@ class ProductBatchController extends Controller
 
         $productBatch->delete();
 
-        $product?->recalculateStockQuantity();
-        $product?->updateWeightedAverageCost();
-        $product?->autoPrice();
+        $product?->refreshMetrics();
 
         return response()->json(['message' => 'Product batch deleted.']);
     }
@@ -251,9 +406,7 @@ class ProductBatchController extends Controller
             $productBatch->increment('quantity_sold', $validated['quantity']);
 
             if ($productBatch->product) {
-                $productBatch->product->recalculateStockQuantity();
-                $productBatch->product->updateWeightedAverageCost();
-                $productBatch->product->autoPrice();
+                $productBatch->product->refreshMetrics();
             }
 
             $unitCost = (float) ($productBatch->cost_per_unit ?? 0);
@@ -307,14 +460,8 @@ class ProductBatchController extends Controller
         $businessId = $request->user()->business_id;
 
         return DB::transaction(function () use ($request, $productId, $quantityNeeded, $businessId) {
-            $deductions = ProductBatch::deductFefo($productId, $businessId, $quantityNeeded);
-
-            $product = Product::find($productId);
-            if ($product) {
-                $product->recalculateStockQuantity();
-                $product->updateWeightedAverageCost();
-                $product->autoPrice();
-            }
+            $product = Product::findOrFail($productId);
+            $deductions = StockService::deductForSale($product, $quantityNeeded, $businessId);
 
             $cogs = 0.0;
             foreach ($deductions as $deduction) {
@@ -411,10 +558,7 @@ class ProductBatchController extends Controller
             ]);
 
             $productBatch->load('product');
-            $p = $productBatch->product;
-            $p?->recalculateStockQuantity();
-            $p?->updateWeightedAverageCost();
-            $p?->autoPrice();
+            $productBatch->product?->refreshMetrics();
 
             $amount = round(abs($adjustment) * $unitCost, 2);
             if ($amount > 0) {
@@ -461,164 +605,5 @@ class ProductBatchController extends Controller
             ->paginate($request->integer('per_page', 10));
 
         return response()->json($products);
-    }
-
-    public function grnReceive(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'purchase_order_id' => 'nullable|exists:purchase_orders,id',
-            'supplier_id' => 'nullable|exists:suppliers,id',
-            'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => ['required', 'numeric', 'min:0.01', ProductQuantity::forItems(fn (string $attribute) => $request->input(str_replace('.quantity', '.product_id', $attribute)))],
-            'items.*.batch_number' => 'required|string',
-            'items.*.expiry_date' => 'required|date|after:today',
-            'items.*.total_cost' => 'required|numeric|min:0',
-            'items.*.selling_price' => 'nullable|numeric|min:0',
-            'items.*.manufacturing_date' => 'nullable|date',
-            'items.*.storage_location' => 'nullable|string',
-            'payment_method' => 'nullable|string|in:cash,bank,credit',
-        ]);
-
-        return DB::transaction(function () use ($request, $validated) {
-            $businessId = $request->user()->business_id;
-            $createdBatches = [];
-
-            $po = null;
-            if (! empty($validated['purchase_order_id'])) {
-                $po = PurchaseOrder::find($validated['purchase_order_id']);
-                if (! $po) {
-                    throw new InsufficientStockException('Purchase order not found.');
-                }
-
-                if (! in_array($po->status, ['ordered', 'partially_received'], true)) {
-                    throw new InsufficientStockException(
-                        "Cannot receive purchase order {$po->order_number}: only 'ordered' or 'partially received' orders can be received (currently '{$po->status}')."
-                    );
-                }
-            }
-
-            $updatedProductIds = [];
-
-            foreach ($validated['items'] as $item) {
-                $unitCost = $item['quantity'] > 0
-                    ? round($item['total_cost'] / $item['quantity'], 2)
-                    : 0;
-
-                $batch = ProductBatch::create([
-                    'business_id' => $businessId,
-                    'product_id' => $item['product_id'],
-                    'batch_number' => $item['batch_number'],
-                    'source_type' => 'goods_receipt',
-                    'quantity' => $item['quantity'],
-                    'expiry_date' => $item['expiry_date'],
-                    'cost_per_unit' => $unitCost,
-                    'total_cost' => $item['total_cost'],
-                    'selling_price' => $item['selling_price'] ?? null,
-                    'manufacturing_date' => $item['manufacturing_date'] ?? null,
-                    'storage_location' => $item['storage_location'] ?? null,
-                    'supplier_id' => $validated['supplier_id'] ?? $po?->supplier_id ?? null,
-                    'received_date' => now()->toDateString(),
-                    'is_active' => true,
-                ]);
-
-                $product = Product::find($item['product_id']);
-                if ($product && $product->has_batch) {
-                    $updatedProductIds[] = $product->id;
-                }
-
-                $createdBatches[] = $batch;
-            }
-
-            foreach (array_unique($updatedProductIds) as $pid) {
-                $p = Product::find($pid);
-                $p?->recalculateStockQuantity();
-                $p?->updateWeightedAverageCost();
-                $p?->autoPrice();
-            }
-
-            if (! empty($validated['purchase_order_id'])) {
-                foreach ($validated['items'] as $item) {
-                    $poItem = PurchaseOrderItem::where('purchase_order_id', $po->id)
-                        ->where('product_id', $item['product_id'])
-                        ->first();
-                    if ($poItem) {
-                        if ((float) $poItem->quantity > 0
-                            && (float) $poItem->received_quantity + (float) $item['quantity'] > (float) $poItem->quantity + 0.001) {
-                            throw new InsufficientStockException(
-                                "Cannot receive more than the ordered quantity for {$poItem->name}. Ordered: {$poItem->quantity}."
-                            );
-                        }
-                        $poItem->increment('received_quantity', $item['quantity']);
-                    }
-                }
-
-                $allFullyReceived = $po->items()->whereColumn('received_quantity', '<', 'quantity')->doesntExist();
-                $statusUpdate = ['status' => $allFullyReceived ? 'received' : 'partially_received'];
-                if ($allFullyReceived) {
-                    $statusUpdate['received_at'] = now();
-                }
-                $po->update($statusUpdate);
-
-                $totalCost = array_sum(array_map(fn ($i) => (float) $i['total_cost'], $validated['items']));
-
-                $paymentMethod = $validated['payment_method'] ?? 'credit';
-                if (in_array($paymentMethod, ['cash', 'bank'], true) && $totalCost > 0.005) {
-                    $directPayment = PurchaseOrderPayment::create([
-                        'business_id' => $businessId,
-                        'user_id' => $request->user()->id,
-                        'purchase_order_id' => $po->id,
-                        'supplier_id' => $validated['supplier_id'] ?? $po->supplier_id,
-                        'payment_number' => 'POPAY-'.strtoupper(Str::random(8)),
-                        'amount' => round($totalCost, 2),
-                        'method' => $paymentMethod,
-                        'status' => 'completed',
-                        'notes' => 'Paid directly on goods receipt',
-                        'metadata' => ['source' => 'goods_receipt_direct'],
-                    ]);
-
-                    app(AccountingService::class)->postSupplierPaymentEntry($businessId, $directPayment, $request->user()->id);
-                }
-
-                app(AccountingService::class)->postGoodsReceiptEntry(
-                    $businessId,
-                    $totalCost,
-                    (int) ($createdBatches[0]->id ?? 0),
-                    $request->user()->id,
-                    'Goods received - batch GRN',
-                    [
-                        'purchase_order_id' => $po->id,
-                        'batch_ids' => collect($createdBatches)->pluck('id')->all(),
-                    ]
-                );
-            } else {
-                $paymentMethod = $validated['payment_method'] ?? 'credit';
-                foreach ($createdBatches as $batch) {
-                    if ((float) $batch->total_cost <= 0) {
-                        continue;
-                    }
-                    app(AccountingService::class)->postGoodsReceiptEntry(
-                        $businessId,
-                        (float) $batch->total_cost,
-                        $batch->id,
-                        $request->user()->id,
-                        'Goods received - batch '.$batch->batch_number,
-                        [
-                            'batch_id' => $batch->id,
-                            'product_id' => $batch->product_id,
-                            'quantity' => (float) $batch->quantity,
-                            'total_cost' => (float) $batch->total_cost,
-                        ],
-                        $paymentMethod
-                    );
-                }
-            }
-
-            return response()->json([
-                'message' => 'Goods received successfully.',
-                'batches' => $createdBatches,
-                'count' => count($createdBatches),
-            ], 201);
-        });
     }
 }

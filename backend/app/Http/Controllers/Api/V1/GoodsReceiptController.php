@@ -224,9 +224,7 @@ class GoodsReceiptController extends Controller
             foreach (array_unique($updatedBatchProducts) as $productId) {
                 $product = Product::find($productId);
                 if ($product) {
-                    $product->recalculateStockQuantity();
-                    $product->updateWeightedAverageCost();
-                    $product->autoPrice();
+                    $product->refreshMetrics();
                 }
             }
 

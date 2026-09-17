@@ -13,6 +13,7 @@ import SlideOver from "@/components/ui/SlideOver";
 import { PackageCheck, Plus, Loader2, Search, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { quantityStep } from "@/lib/product";
+import { round2 } from "@/lib/math";
 import { usePagination } from "@/lib/pagination";
 
 type GRNItem = {
@@ -179,8 +180,6 @@ export default function GRNPage() {
     const q = productSearch.trim().toLowerCase();
     return !q || p.name.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q) || (p.barcode ?? "").toLowerCase().includes(q);
   });
-
-  const round2 = (n: number) => Math.round(n * 100) / 100;
 
   const receiptTotal = round2(items.reduce((sum, i) => {
     const qty = parseFloat(i.quantity) * (mode === "direct" ? (i.purchase_unit_qty ?? 1) : 1);

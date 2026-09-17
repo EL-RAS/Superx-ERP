@@ -7,7 +7,6 @@ use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\Payment;
 use App\Models\Product;
-use App\Models\ProductBatch;
 use App\Models\Promotion;
 use App\Models\PromotionUsage;
 use App\Models\Shift;
@@ -16,7 +15,9 @@ use App\Models\Warehouse;
 use App\Rules\ProductQuantity;
 use App\Services\AccountingService;
 use App\Services\DocumentNumberService;
+use App\Services\InvoiceService;
 use App\Services\LoyaltyService;
+use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -134,10 +135,6 @@ class InvoiceController extends Controller
                         'payment_status' => $isPosPayment ? ($isCreditPayment ? 'unpaid' : 'paid') : ($validated['payment_status'] ?? 'unpaid'),
                     ]);
 
-                    $subtotal = 0;
-                    $totalTax = 0;
-                    $totalDiscount = 0;
-
                     $businessSettings = $request->user()->business->mergedSettings();
                     $taxMethod = $businessSettings['tax_calculation_method'] ?? 'exclusive';
                     $taxEnabled = ($businessSettings['tax_enabled'] ?? true) && $taxMethod !== 'exclusive';
@@ -148,53 +145,20 @@ class InvoiceController extends Controller
                         ->orderBy('id')
                         ->value('id');
 
+                    $totals = app(InvoiceService::class)->createItems($invoice, $validated['items'], $taxEnabled);
+                    $subtotal = $totals['subtotal'];
+                    $totalTax = $totals['tax'];
+                    $totalDiscount = $totals['discount'];
+
                     foreach ($validated['items'] as $item) {
-                        $lineTotal = $item['quantity'] * $item['unit_price'];
-                        $lineDiscount = $item['discount'] ?? 0;
-                        $rate = $item['tax_rate'] ?? 0;
-
-                        if ($taxEnabled && $rate > 0) {
-                            $lineNet = $lineTotal / (1 + $rate / 100);
-                            $lineTax = round($lineTotal - $lineNet, 4);
-                            $lineNet = round($lineNet, 4);
-                        } else {
-                            $lineNet = $lineTotal;
-                            $lineTax = ($lineTotal - $lineDiscount) * ($rate / 100);
-                        }
-
-                        $lineItemTotal = $lineNet + $lineTax;
-
-                        $subtotal += $lineTotal;
-                        $totalTax += $lineTax;
-                        $totalDiscount += $lineDiscount;
-
-                        InvoiceItem::create([
-                            'business_id' => $request->user()->business_id,
-                            'invoice_id' => $invoice->id,
-                            'product_id' => $item['product_id'] ?? null,
-                            'name' => $item['name'],
-                            'quantity' => $item['quantity'],
-                            'unit_price' => $item['unit_price'],
-                            'discount' => $lineDiscount,
-                            'tax_rate' => $item['tax_rate'] ?? 0,
-                            'tax_amount' => round($lineTax, 2),
-                            'total' => round($lineItemTotal, 2),
-                        ]);
-
                         if (! empty($item['product_id'])) {
                             $product = Product::findOrFail($item['product_id']);
                             $deductNow = ($validated['payment_status'] ?? 'unpaid') !== 'unpaid' || $paymentMethod !== null;
                             if ($deductNow) {
                                 $businessId = $request->user()->business_id;
-                                $deductions = [];
+                                $deductions = StockService::deductForSale($product, (float) $item['quantity'], $businessId, $allowNegativeStock);
+
                                 if ($product->has_batch) {
-                                    $available = ProductBatch::getAvailableFefoStock((int) $item['product_id'], $businessId);
-                                    if (! $allowNegativeStock && (float) $available < $item['quantity']) {
-                                        throw new \RuntimeException(
-                                            "Insufficient batch stock for {$product->name}. Available: {$available}, requested: {$item['quantity']}."
-                                        );
-                                    }
-                                    $deductions = ProductBatch::deductFefo((int) $item['product_id'], $businessId, (float) $item['quantity'], $allowNegativeStock);
                                     $invoiceItem = InvoiceItem::where('invoice_id', $invoice->id)
                                         ->where('product_id', $item['product_id'])
                                         ->latest('id')
@@ -204,17 +168,8 @@ class InvoiceController extends Controller
                                             'metadata' => array_merge($invoiceItem->metadata ?? [], ['deductions' => $deductions]),
                                         ]);
                                     }
-                                    $product->fresh()->recalculateStockQuantity();
-                                    $product->fresh()->updateWeightedAverageCost();
-                                    $product->fresh()->autoPrice();
-                                } else {
-                                    if (! $allowNegativeStock && (float) $product->stock_quantity < $item['quantity']) {
-                                        throw new \RuntimeException(
-                                            "Insufficient stock for {$product->name}. Available: {$product->stock_quantity}, requested: {$item['quantity']}."
-                                        );
-                                    }
-                                    $product->decrement('stock_quantity', $item['quantity']);
                                 }
+
                                 StockMovement::create([
                                     'business_id' => $request->user()->business_id,
                                     'product_id' => $item['product_id'],
@@ -243,7 +198,8 @@ class InvoiceController extends Controller
                             : round($subtotal + $totalTax - $totalDiscount + $shipping, 2),
                     ]);
 
-                    $this->recordPromotionUsage($invoice, $validated['promotions'] ?? []);
+                    $invoiceService = app(InvoiceService::class);
+                    $invoiceService->recordPromotionUsage($invoice, $validated['promotions'] ?? []);
 
                     $createdPayments = [];
 
@@ -392,47 +348,14 @@ class InvoiceController extends Controller
             if (isset($validated['items'])) {
                 $invoice->items()->delete();
 
-                $subtotal = 0;
-                $totalTax = 0;
-                $totalDiscount = 0;
-
                 $businessSettings = $request->user()->business->mergedSettings();
                 $taxMethod = $businessSettings['tax_calculation_method'] ?? 'exclusive';
                 $taxEnabled = ($businessSettings['tax_enabled'] ?? true) && $taxMethod !== 'exclusive';
 
-                foreach ($validated['items'] as $item) {
-                    $lineTotal = $item['quantity'] * $item['unit_price'];
-                    $lineDiscount = $item['discount'] ?? 0;
-                    $rate = $item['tax_rate'] ?? 0;
-
-                    if ($taxEnabled && $rate > 0) {
-                        $lineNet = $lineTotal / (1 + $rate / 100);
-                        $lineTax = round($lineTotal - $lineNet, 4);
-                        $lineNet = round($lineNet, 4);
-                    } else {
-                        $lineNet = $lineTotal;
-                        $lineTax = ($lineTotal - $lineDiscount) * ($rate / 100);
-                    }
-
-                    $lineItemTotal = $lineNet + $lineTax;
-
-                    $subtotal += $lineTotal;
-                    $totalTax += $lineTax;
-                    $totalDiscount += $lineDiscount;
-
-                    InvoiceItem::create([
-                        'business_id' => $request->user()->business_id,
-                        'invoice_id' => $invoice->id,
-                        'product_id' => $item['product_id'] ?? null,
-                        'name' => $item['name'],
-                        'quantity' => $item['quantity'],
-                        'unit_price' => $item['unit_price'],
-                        'discount' => $lineDiscount,
-                        'tax_rate' => $item['tax_rate'] ?? 0,
-                        'tax_amount' => round($lineTax, 2),
-                        'total' => round($lineItemTotal, 2),
-                    ]);
-                }
+                $totals = app(InvoiceService::class)->createItems($invoice, $validated['items'], $taxEnabled);
+                $subtotal = $totals['subtotal'];
+                $totalTax = $totals['tax'];
+                $totalDiscount = $totals['discount'];
 
                 $shipping = (float) ($validated['shipping_amount'] ?? $invoice->shipping_amount ?? 0);
                 $requestDiscount = (float) ($validated['discount_amount'] ?? $invoice->discount_amount ?? 0);
@@ -604,27 +527,11 @@ class InvoiceController extends Controller
 
                         if (! $alreadyDeducted) {
                             $product = Product::findOrFail($item->product_id);
+                            $deductions = StockService::deductForSale($product, (float) $item->quantity, $businessId, $allowNegativeStock);
                             if ($product->has_batch) {
-                                $available = ProductBatch::getAvailableFefoStock((int) $item->product_id, $businessId);
-                                if (! $allowNegativeStock && (float) $available < (float) $item->quantity) {
-                                    throw new \RuntimeException(
-                                        "Insufficient batch stock for {$product->name}. Available: {$available}, requested: {$item->quantity}."
-                                    );
-                                }
-                                $deductions = ProductBatch::deductFefo((int) $item->product_id, $businessId, (float) $item->quantity, $allowNegativeStock);
                                 $item->update([
                                     'metadata' => array_merge($item->metadata ?? [], ['deductions' => $deductions]),
                                 ]);
-                                $product->fresh()->recalculateStockQuantity();
-                                $product->fresh()->updateWeightedAverageCost();
-                                $product->fresh()->autoPrice();
-                            } else {
-                                if (! $allowNegativeStock && (float) $product->stock_quantity < (float) $item->quantity) {
-                                    throw new \RuntimeException(
-                                        "Insufficient stock for {$product->name}. Available: {$product->stock_quantity}, requested: {$item->quantity}."
-                                    );
-                                }
-                                $product->decrement('stock_quantity', $item->quantity);
                             }
                             StockMovement::create([
                                 'business_id' => $businessId,
@@ -714,7 +621,7 @@ class InvoiceController extends Controller
                 $accounting->postVoidInvoice($businessId, $invoice, $request->user()->id);
             }
 
-            $this->restoreStockForVoid($invoice, $request->user()->id);
+            app(InvoiceService::class)->restoreStockForVoid($invoice, $request->user()->id);
 
             foreach (PromotionUsage::where('invoice_id', $invoice->id)->get() as $usage) {
                 Promotion::where('id', $usage->promotion_id)->decrement('current_uses');
@@ -728,109 +635,6 @@ class InvoiceController extends Controller
 
             return response()->json($invoice);
         });
-    }
-
-    /**
-     * Persist promotion analytics for a completed sale. Each applied promotion
-     * gets a usage row (discount actually given + the cart revenue it is
-     * attributed to, split proportionally by discount share so aggregate totals
-     * never double count when several promotions share one cart). The breakdown
-     * is also mirrored into the invoice metadata for auditability.
-     */
-    private function recordPromotionUsage(Invoice $invoice, array $promotions): void
-    {
-        $applied = [];
-        foreach ($promotions as $promo) {
-            $discount = round((float) ($promo['discount'] ?? 0), 2);
-            if ($discount > 0) {
-                $applied[] = ['id' => (int) $promo['id'], 'discount' => $discount];
-            }
-        }
-
-        if (count($applied) === 0) {
-            return;
-        }
-
-        $grossRevenue = round((float) $invoice->subtotal + (float) $invoice->tax_amount, 2);
-        $totalDiscount = array_sum(array_column($applied, 'discount'));
-
-        foreach ($applied as $entry) {
-            $share = $totalDiscount > 0 ? $entry['discount'] / $totalDiscount : 0;
-            PromotionUsage::create([
-                'business_id' => $invoice->business_id,
-                'promotion_id' => $entry['id'],
-                'invoice_id' => $invoice->id,
-                'discount_amount' => $entry['discount'],
-                'associated_revenue' => round($grossRevenue * $share, 2),
-            ]);
-            Promotion::where('id', $entry['id'])->increment('current_uses');
-        }
-
-        $invoice->update([
-            'metadata' => array_merge($invoice->metadata ?? [], ['promotions' => $applied]),
-        ]);
-    }
-
-    /**
-     * Put stock back when an invoice is voided. Batch products reverse the
-     * exact FEFO deductions recorded on the item (quantity_sold decremented);
-     * legacy batch items without deduction metadata are best-effort restored
-     * to the earliest active batch. Simple products get their stock_quantity
-     * incremented. A StockMovement records each addition.
-     */
-    private function restoreStockForVoid(Invoice $invoice, int $userId): void
-    {
-        $businessId = $invoice->business_id;
-
-        foreach ($invoice->items as $item) {
-            if (empty($item->product_id)) {
-                continue;
-            }
-
-            $product = Product::find($item->product_id);
-            if (! $product) {
-                continue;
-            }
-
-            $qty = (float) $item->quantity;
-
-            if ($product->has_batch) {
-                $deductions = $item->metadata['deductions'] ?? null;
-                if (is_array($deductions) && count($deductions) > 0) {
-                    foreach ($deductions as $deduction) {
-                        $batch = ProductBatch::find($deduction['batch_id'] ?? null);
-                        if (! $batch || (string) $batch->product_id !== (string) $product->id) {
-                            continue;
-                        }
-                        $batch->decrement('quantity_sold', (float) $deduction['quantity']);
-                    }
-                } else {
-                    $batch = ProductBatch::where('product_id', $product->id)
-                        ->where('is_active', true)
-                        ->orderBy('expiry_date')
-                        ->orderBy('id')
-                        ->first();
-                    if ($batch) {
-                        $batch->increment('quantity', $qty);
-                    }
-                }
-
-                $product->fresh()->recalculateStockQuantity();
-                $product->fresh()->updateWeightedAverageCost();
-            } else {
-                $product->increment('stock_quantity', $qty);
-            }
-
-            StockMovement::create([
-                'business_id' => $businessId,
-                'product_id' => $item->product_id,
-                'quantity' => $qty,
-                'type' => 'addition',
-                'reference_type' => 'invoice_void',
-                'reference_id' => $invoice->id,
-                'notes' => 'Void - '.$invoice->invoice_number,
-            ]);
-        }
     }
 
     public function duplicate(Invoice $invoice): JsonResponse

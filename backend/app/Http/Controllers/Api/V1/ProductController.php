@@ -183,8 +183,6 @@ class ProductController extends Controller
             $validated['stock_quantity'] = round((float) $validated['stock_quantity']);
         }
 
-        Log::info('Product store payload', $validated);
-
         try {
             DB::beginTransaction();
             $product = Product::create($validated);
@@ -252,8 +250,6 @@ class ProductController extends Controller
         if (isset($validated['stock_quantity'])) {
             $validated['stock_quantity'] = round((float) $validated['stock_quantity']);
         }
-
-        Log::info('Product update payload', ['product_id' => $product->id, 'stock_quantity' => $validated['stock_quantity'] ?? $product->stock_quantity, 'payload' => $validated]);
 
         try {
             DB::beginTransaction();

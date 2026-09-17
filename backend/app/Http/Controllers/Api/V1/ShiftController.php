@@ -136,6 +136,15 @@ class ShiftController extends Controller
             ->where('refunded_amount', '>', 0)
             ->sum('refunded_amount'), 2);
 
+        $expectedCash = round(
+            (float) $shift->opening_balance
+            + (float) $shift->payments()
+                ->where('method', 'cash')
+                ->sum('amount')
+            - $cashRefunds,
+            2
+        );
+
         $shift->update([
             'total_sales' => $totalSales,
             'total_refunds' => $totalRefunds,
@@ -146,7 +155,8 @@ class ShiftController extends Controller
         $shift->close(
             $validated['actual_cash'],
             $paymentBreakdown,
-            $cashRefunds
+            $cashRefunds,
+            $expectedCash
         );
 
         app(AccountingService::class)->postShiftCloseEntry(
@@ -210,6 +220,10 @@ class ShiftController extends Controller
         $zReport = ZReport::where('shift_id', $shift->id)->first();
 
         if ($zReport) {
+            $zReport->load(['shift:id,shift_number', 'user:id,name']);
+            $zReport->setAttribute('shift_number', $zReport->shift?->shift_number);
+            $zReport->setAttribute('cashier', $zReport->user?->name);
+
             return response()->json([
                 'shift' => $shift,
                 'z_report' => $zReport,
@@ -235,18 +249,29 @@ class ShiftController extends Controller
             ->where('refunded_amount', '>', 0)
             ->sum('refunded_amount'), 2);
 
+        $expectedCash = $shift->expected_cash !== null
+            ? (float) $shift->expected_cash
+            : round(
+                (float) $shift->opening_balance
+                + (float) $shift->payments()->where('method', 'cash')->sum('amount')
+                - $cashRefunds,
+                2
+            );
+
         return response()->json([
             'shift' => $shift,
             'z_report' => [
                 'shift_number' => $shift->shift_number,
-                'cashier' => $shift->user->name,
+                'cashier' => $shift->user?->name,
                 'started_at' => $shift->started_at,
                 'ended_at' => $shift->ended_at,
                 'opening_balance' => $shift->opening_balance,
                 'closing_balance' => $shift->closing_balance,
-                'expected_cash' => $shift->expected_cash,
+                'expected_cash' => $expectedCash,
                 'actual_cash' => $shift->actual_cash,
-                'variance' => $shift->variance,
+                'variance' => $shift->actual_cash !== null
+                    ? round((float) $shift->actual_cash - $expectedCash, 2)
+                    : null,
                 'total_sales' => $shift->total_sales,
                 'total_refunds' => $shift->total_refunds,
                 'total_discounts' => $shift->total_discounts,
@@ -254,6 +279,14 @@ class ShiftController extends Controller
                 'payment_breakdown' => $paymentBreakdown,
                 'cash_refunds' => $cashRefunds,
                 'net_cash' => round((float) $shift->total_sales - (float) $shift->total_refunds, 2),
+                'shift' => [
+                    'id' => $shift->id,
+                    'shift_number' => $shift->shift_number,
+                ],
+                'user' => [
+                    'id' => $shift->user_id,
+                    'name' => $shift->user?->name,
+                ],
             ],
         ]);
     }
@@ -267,7 +300,6 @@ class ShiftController extends Controller
 
         if ($shift) {
             $cashSales = (float) $shift->payments()
-                ->where('status', 'completed')
                 ->where('method', 'cash')
                 ->sum('amount');
 

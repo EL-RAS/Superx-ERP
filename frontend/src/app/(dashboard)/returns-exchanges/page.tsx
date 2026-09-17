@@ -10,6 +10,7 @@ import { mapFieldErrors } from "@/lib/validation";
 import { useI18n } from "@/lib/i18n";
 import { quantityStep } from "@/lib/product";
 import { usePagination } from "@/lib/pagination";
+import { round2 } from "@/lib/math";
 import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
 import type { Column } from "@/components/ui/DataTable";
@@ -40,10 +41,6 @@ interface ExchangeLine {
 }
 
 const emptyExchangeLine: ExchangeLine = { product_id: "", name: "", quantity: "1", unit_price: "0", tax_rate: "0", is_weighable: false, unit: null };
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
 
 export default function ReturnsExchangesPage() {
   const { t, locale } = useI18n();
