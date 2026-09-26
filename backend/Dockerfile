@@ -1,4 +1,4 @@
-FROM php:8.3-cli
+FROM php:8.4-cli
 
 # Install the required packages for the PostgreSQL database
 RUN apt-get update -y && apt-get install -y libpq-dev unzip
