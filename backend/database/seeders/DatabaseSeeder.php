@@ -10,12 +10,12 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             BusinessTypeSeeder::class,
-            TenantSeeder::class,
-            BusinessSeeder::class,
+            // TenantSeeder::class,
+            // BusinessSeeder::class,
             CategorySeeder::class,
             ChartOfAccountsSeeder::class,
-            OpeningBalanceSeeder::class,
-            SuperxOwnerSeeder::class,
+            // OpeningBalanceSeeder::class,
+            // SuperxOwnerSeeder::class,
         ]);
     }
 }
