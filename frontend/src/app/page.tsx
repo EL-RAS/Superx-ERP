@@ -13,6 +13,7 @@ import {
   Cpu, TrendingUp,
 } from "lucide-react";
 import GlowButton from "@/components/landing/GlowButton";
+import LanguageToggle from "@/components/landing/LanguageToggle";
 import TiltCard from "@/components/landing/TiltCard";
 
 const SectorShowcase = lazy(() => import("@/components/landing/SectorShowcase"));
@@ -92,7 +93,7 @@ function MockDashboard({ t }: { t: (key: string, params?: Record<string, string>
 
 export default function LandingPage() {
   const router = useRouter();
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const token = useAuthStore((s) => s.token);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -138,12 +139,7 @@ export default function LandingPage() {
             <Image src="/images/logobg.png" alt="superX Logo" width={100} height={100} className="w-35 h-35 object-contain rounded-xl" priority />
           </Link>
           <div className="hidden md:flex items-center gap-8">
-            <button
-              onClick={() => router.push(locale === "en" ? "/ar" : "/")}
-              className="text-sm text-zinc-400 hover:text-white transition-colors"
-            >
-              {locale === "en" ? "عربي" : "EN"}
-            </button>
+            <LanguageToggle className="text-sm text-zinc-400 hover:text-white transition-colors" />
             <GlowButton onClick={goToRegister}>{t("landing.cta_start")}</GlowButton>
           </div>
           <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="md:hidden p-2 text-zinc-400 hover:text-white">
@@ -158,9 +154,9 @@ export default function LandingPage() {
             className="md:hidden border-t border-white/[0.06] bg-zinc-950/95 backdrop-blur-xl"
           >
             <div className="px-4 py-4 flex flex-col gap-3">
-              <button onClick={() => { setMobileMenuOpen(false); router.push(locale === "en" ? "/ar" : "/"); }} className="text-sm text-zinc-400 hover:text-white text-start py-2">
-                {locale === "en" ? "عربي" : "EN"}
-              </button>
+              <div onClick={() => setMobileMenuOpen(false)}>
+                <LanguageToggle className="text-sm text-zinc-400 hover:text-white text-start py-2" />
+              </div>
               <GlowButton onClick={() => { setMobileMenuOpen(false); goToRegister(); }}>{t("landing.cta_start")}</GlowButton>
             </div>
           </motion.div>

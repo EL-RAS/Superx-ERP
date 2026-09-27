@@ -16,19 +16,26 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 
 const STORAGE_KEY = "sx_locale";
 
+/** Guards against a tampered/stale `sx_locale` value in localStorage. */
+function isLocale(value: unknown): value is Locale {
+  return value === "en" || value === "ar";
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("en");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // The cookie wins over localStorage: `middleware.ts` sets it from a
-    // locale-prefixed URL (`/ar`), so an explicit `/ar` visit beats a stale
-    // localStorage value. `setLocale` writes both, so they stay in sync.
-    const fromCookie = getLocaleCookie();
-    const stored = (localStorage.getItem(STORAGE_KEY) as Locale) || "en";
-    const resolved = fromCookie ?? stored;
     const frame = requestAnimationFrame(() => {
       setMounted(true);
+      // Read inside the frame so a choice made between mount and the first
+      // paint is never overwritten with the value that was there at setup.
+      // The cookie wins over localStorage: `middleware.ts` writes it from a
+      // locale-prefixed URL, so an explicit `/ar` visit beats a stale stored
+      // locale. `setLocale` writes both, so they cannot drift apart.
+      const fromCookie = getLocaleCookie();
+      const fromStorage = localStorage.getItem(STORAGE_KEY);
+      const resolved = fromCookie ?? (isLocale(fromStorage) ? fromStorage : "en");
       if (resolved !== locale) setLocaleState(resolved);
     });
     return () => cancelAnimationFrame(frame);

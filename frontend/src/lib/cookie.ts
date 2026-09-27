@@ -12,11 +12,14 @@ const COOKIE_DAYS = 30;
 const LOCALE_COOKIE_NAME = "sx_locale";
 const LOCALES = ["en", "ar"] as const;
 
+/** Matches the `maxAge` `middleware.ts` writes, so the two never disagree. */
+const LOCALE_COOKIE_DAYS = 365;
+
 export type StoredLocale = (typeof LOCALES)[number];
 
 export function setLocaleCookie(locale: StoredLocale) {
   Cookies.set(LOCALE_COOKIE_NAME, locale, {
-    expires: COOKIE_DAYS,
+    expires: LOCALE_COOKIE_DAYS,
     path: "/",
     sameSite: "lax",
   });
