@@ -44,7 +44,7 @@ class OnboardingService
 
     public function baseDomain(): string
     {
-        return strtolower((string) config('superx.tenant_domain', 'superx.com'));
+        return strtolower((string) config('superx.tenant_domain'));
     }
 
     public function normalizeSubdomain(string $subdomain): string
@@ -71,38 +71,79 @@ class OnboardingService
         $subdomain = Tenant::find($token->tenant_id)?->subdomain;
 
         if (! $subdomain) {
-            $front = rtrim((string) config('superx.frontend_url', 'http://localhost:3000'), '/');
-
-            return $front.'/activate?token='.$token->token;
+            return $this->centralUrl('/activate?token='.$token->token);
         }
 
         return $this->storeUrl($this->buildDomain($subdomain), '/activate?token='.$token->token);
     }
 
     /**
-     * Environment-aware store URL. In local development the production base
-     * domain is swapped for `localhost` and the dev origin's scheme/port are
-     * carried over (e.g. `http://brillivo.localhost:3000`) so tenant links
-     * resolve on the developer's machine instead of a hardcoded production
-     * host. In production the canonical `{subdomain}.{baseDomain}` is used.
+     * Environment-aware store URL.
+     *
+     * In production the canonical `{subdomain}.{baseDomain}` is used, over the
+     * scheme of `frontend_url` (or https when it is unset). In local
+     * development the base domain is swapped for `localhost` and the dev
+     * origin's port is carried over, so tenant links resolve on the
+     * developer's machine instead of a hardcoded production host.
+     *
+     * The dev swap requires BOTH `superx.dev_tenant_subdomains` and a loopback
+     * `frontend_url`. A production deploy that leaves `SUPERX_FRONTEND_URL` at
+     * the development value — or inherits it from a `.env` baked into the image
+     * — therefore still gets production URLs instead of `{sub}.localhost`.
      */
     public function storeUrl(string $domain, string $path = ''): string
     {
-        $front = rtrim((string) config('superx.frontend_url', 'http://localhost:3000'), '/');
-        $frontHost = strtolower(parse_url($front, PHP_URL_HOST) ?: 'localhost');
-        $scheme = parse_url($front, PHP_URL_SCHEME) ?: 'http';
-        $port = parse_url($front, PHP_URL_PORT);
+        $front = $this->frontendUrl();
+        $host = $domain;
+        $scheme = 'https';
 
-        if (in_array($frontHost, ['localhost', '127.0.0.1'], true)) {
-            $subdomain = Str::before($domain, '.');
-            $host = $subdomain.'.localhost'.($port ? ':'.$port : '');
-        } else {
-            $host = $domain;
+        if ($front !== null) {
+            $frontHost = strtolower((string) (parse_url($front, PHP_URL_HOST) ?: ''));
+            $scheme = (string) (parse_url($front, PHP_URL_SCHEME) ?: $scheme);
+
+            if (config('superx.dev_tenant_subdomains') && in_array($frontHost, ['localhost', '127.0.0.1', '::1'], true)) {
+                $port = parse_url($front, PHP_URL_PORT);
+                $host = Str::before($domain, '.').'.localhost'.($port ? ':'.$port : '');
+            }
         }
 
+        return $this->joinUrl($scheme, $host, $path);
+    }
+
+    /**
+     * Central (non-tenant) app URL. Falls back to the base domain over https
+     * when `SUPERX_FRONTEND_URL` is unset, so a production deploy never
+     * inherits a `localhost` link.
+     */
+    private function centralUrl(string $path = ''): string
+    {
+        $front = $this->frontendUrl();
+
+        if ($front !== null) {
+            return $front.$this->suffix($path);
+        }
+
+        return $this->joinUrl('https', $this->baseDomain(), $path);
+    }
+
+    /** Configured frontend origin, or null when it is not set for this environment. */
+    private function frontendUrl(): ?string
+    {
+        $url = rtrim((string) config('superx.frontend_url', ''), '/');
+
+        return $url !== '' ? $url : null;
+    }
+
+    private function joinUrl(string $scheme, string $host, string $path): string
+    {
+        return $scheme.'://'.$host.$this->suffix($path);
+    }
+
+    private function suffix(string $path): string
+    {
         $path = ltrim($path, '/');
 
-        return $scheme.'://'.$host.($path !== '' ? '/'.$path : '');
+        return $path !== '' ? '/'.$path : '';
     }
 
     // ─── Provisioning (owner approval) ────────────────────────────
@@ -533,7 +574,7 @@ class OnboardingService
             return $domain->tenant;
         }
 
-        // Try base domain: "mystore" → "mystore.superx.com"
+        // Bare subdomain: "mystore" → "mystore.{baseDomain}"
         if (! str_contains($host, '.')) {
             $domain = Domain::where('domain', $this->buildDomain($host))->first();
             if ($domain) {
@@ -547,9 +588,7 @@ class OnboardingService
     private function buildLoginUrl(?string $domain): string
     {
         if (! $domain) {
-            $front = rtrim((string) config('superx.frontend_url', 'http://localhost:3000'), '/');
-
-            return $front.'/login';
+            return $this->centralUrl('/login');
         }
 
         return $this->storeUrl($domain, '/login');

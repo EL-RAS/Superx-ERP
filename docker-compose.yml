@@ -25,6 +25,13 @@ services:
       - DB_DATABASE=${DB_DATABASE}
       - DB_USERNAME=${DB_USERNAME}
       - DB_PASSWORD=${DB_PASSWORD}
+      # Tenant subdomains are generated under this base domain and it also
+      # feeds config('tenancy.central_domains'). MUST be a bare host.
+      - CENTRAL_DOMAIN=${CENTRAL_DOMAIN:-superx-erp.com}
+      # Empty in production: store/activation/login URLs are then derived from
+      # CENTRAL_DOMAIN over https. Set it locally to enable {sub}.localhost URLs.
+      - SUPERX_FRONTEND_URL=${SUPERX_FRONTEND_URL:-}
+      - SUPERX_TENANT_DEV_SUBDOMAINS=${SUPERX_TENANT_DEV_SUBDOMAINS:-false}
     depends_on:
       - db
 
@@ -33,6 +40,9 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: "https://superx-erp.com/api/v1"
+        # Lets the login page recognise a tenant host ({sub}.{base}) and run
+        # tenant-domain login instead of the owner-only central login.
+        NEXT_PUBLIC_SUPERX_BASE_DOMAIN: "${CENTRAL_DOMAIN:-superx-erp.com}"
     restart: always
     ports:
       - "3000:3000"

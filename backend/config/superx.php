@@ -29,17 +29,38 @@ return [
     |--------------------------------------------------------------------------
     |
     | `tenant_domain` is the base domain that tenant store subdomains are
-    | generated under (e.g. `albaraka` -> `albaraka.superx.com`). Tenant URLs
-    | (store, activation links, login) are built environment-aware: production
-    | uses `{subdomain}.{tenant_domain}`, while local development swaps the host
-    | for `{subdomain}.localhost` and carries the `SUPERX_FRONTEND_URL`
-    | scheme/port (e.g. `http://albaraka.localhost:3000`).
+    | generated under (e.g. `albaraka` -> `albaraka.superx-erp.com`). It is the
+    | single source of truth for the base domain — `config/tenancy.php`
+    | resolves `central_domains` from the SAME env vars, so the two can never
+    | disagree. Precedence: `CENTRAL_DOMAIN`, then the legacy
+    | `SUPERX_TENANT_DOMAIN`, then the fallback below. Set `CENTRAL_DOMAIN` in
+    | every deployed environment; leaving it unset makes the config default
+    | decide production behaviour.
     |
     */
 
-    'tenant_domain' => env('SUPERX_TENANT_DOMAIN', 'superx.com'),
+    'tenant_domain' => strtolower((string) (env('CENTRAL_DOMAIN') ?: env('SUPERX_TENANT_DOMAIN') ?: 'superx-erp.com')),
 
-    'frontend_url' => env('SUPERX_FRONTEND_URL', 'http://localhost:3000'),
+    /*
+    | Frontend origin used to build tenant store URLs (store, activation links,
+    | login). Leave it EMPTY in production: URLs are then derived from
+    | `tenant_domain` over https, so a missing env var can never leak
+    | `localhost` into owner-facing links. Set it in local development to the
+    | Next.js origin (e.g. `http://localhost:3000`).
+    */
+    'frontend_url' => rtrim((string) env('SUPERX_FRONTEND_URL', ''), '/'),
+
+    /*
+    | Whether tenant URLs collapse onto `{subdomain}.localhost` instead of
+    | `{subdomain}.{tenant_domain}`. Defaults to true for local/testing and
+    | false everywhere else, and `OnboardingService::storeUrl()` additionally
+    | requires `frontend_url` to be a loopback host — so a production deploy
+    | that forgets (or inherits) the dev value still emits production URLs.
+    */
+    'dev_tenant_subdomains' => filter_var(
+        env('SUPERX_TENANT_DEV_SUBDOMAINS', in_array(env('APP_ENV', 'production'), ['local', 'testing'], true)),
+        FILTER_VALIDATE_BOOL
+    ),
 
     // Lifespan (days) of the one-time activation link issued at provisioning.
     'activation_ttl_days' => (int) env('SUPERX_ACTIVATION_TTL_DAYS', 7),

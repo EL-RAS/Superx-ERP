@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { getLocaleCookie, setLocaleCookie } from "@/lib/cookie";
 
 export type Locale = "en" | "ar";
 
@@ -20,16 +21,22 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // The cookie wins over localStorage: `middleware.ts` sets it from a
+    // locale-prefixed URL (`/ar`), so an explicit `/ar` visit beats a stale
+    // localStorage value. `setLocale` writes both, so they stay in sync.
+    const fromCookie = getLocaleCookie();
     const stored = (localStorage.getItem(STORAGE_KEY) as Locale) || "en";
+    const resolved = fromCookie ?? stored;
     const frame = requestAnimationFrame(() => {
       setMounted(true);
-      if (stored !== locale) setLocaleState(stored);
+      if (resolved !== locale) setLocaleState(resolved);
     });
     return () => cancelAnimationFrame(frame);
   }, [locale]);
 
   const setLocale = useCallback((l: Locale) => {
     setLocaleState(l);
+    setLocaleCookie(l);
     if (typeof window !== "undefined") {
       localStorage.setItem(STORAGE_KEY, l);
     }

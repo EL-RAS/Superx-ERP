@@ -15,11 +15,21 @@ return [
      * The list of domains hosting your central app.
      *
      * Only relevant if you're using the domain or subdomain identification middleware.
+     *
+     * Resolved from the same env vars as `config('superx.tenant_domain')` so the
+     * base domain has exactly one source of truth - see config/superx.php. The
+     * APP_URL host is folded in because in every environment it IS the host the
+     * central app answers on, and it also covers an extra central alias
+     * (e.g. a `www.` host) without editing this file.
+     *
+     * @var list<string>
      */
-    'central_domains' => [
-        '127.0.0.1',
+    'central_domains' => array_values(array_unique(array_filter([
+        strtolower((string) (env('CENTRAL_DOMAIN') ?: env('SUPERX_TENANT_DOMAIN') ?: 'superx-erp.com')),
+        strtolower((string) (parse_url((string) env('APP_URL', ''), PHP_URL_HOST) ?: '')),
         'localhost',
-    ],
+        '127.0.0.1',
+    ]))),
 
     /**
      * Tenancy bootstrappers are executed when tenancy is initialized.

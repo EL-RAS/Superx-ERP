@@ -28,6 +28,9 @@ class OnboardingWorkflowTest extends TestCase
 {
     private BusinessType $businessType;
 
+    /** Base domain every domain assertion in this suite is built from. */
+    private const BASE_DOMAIN = 'superx.test';
+
     /** @var list<string> tenant ids (their DB prefix + id = physical DB name) */
     private array $createdTenantIds = [];
 
@@ -42,9 +45,14 @@ class OnboardingWorkflowTest extends TestCase
         RefreshDatabaseState::$migrated = false;
         $this->artisan('migrate:fresh');
 
-        // Pin the dev frontend origin so tenant URLs resolve to subdomain.localhost
-        // (a leaked override from another test would break the env-aware asserts).
-        config(['superx.frontend_url' => 'http://localhost:3000']);
+        // Pin the tenant base domain + dev frontend origin so tenant URLs resolve
+        // to `{sub}.superx.test` / `http://{sub}.localhost:3000` regardless of the
+        // shipped config defaults (and of an env var leaked by another test).
+        config([
+            'superx.tenant_domain' => self::BASE_DOMAIN,
+            'superx.frontend_url' => 'http://localhost:3000',
+            'superx.dev_tenant_subdomains' => true,
+        ]);
 
         $this->businessType = BusinessType::create([
             'slug' => 'supermarket',
@@ -180,10 +188,10 @@ class OnboardingWorkflowTest extends TestCase
         $tenant = Tenant::find($business->id);
         $this->assertNotNull($tenant);
         $this->assertSame('sami-superstore', $tenant->subdomain);
-        $this->assertSame('sami-superstore.superx.com', $tenant->domain);
+        $this->assertSame('sami-superstore.'.self::BASE_DOMAIN, $tenant->domain);
         $this->assertSame($leadId, $tenant->lead_id);
 
-        $domain = Domain::where('domain', 'sami-superstore.superx.com')->first();
+        $domain = Domain::where('domain', 'sami-superstore.'.self::BASE_DOMAIN)->first();
         $this->assertNotNull($domain);
         $this->assertSame($tenant->id, $domain->tenant_id);
         $this->createdTenantIds[] = (string) $tenant->id;
@@ -214,14 +222,65 @@ class OnboardingWorkflowTest extends TestCase
 
     public function test_provision_generates_production_store_urls_when_frontend_is_remote(): void
     {
-        config(['superx.frontend_url' => 'https://app.superx.com']);
+        config(['superx.frontend_url' => 'https://app.superx.test']);
         $leadId = $this->submitLead();
         $this->actingAsOwner();
 
         $res = $this->postJson("/api/v1/platform/leads/{$leadId}/approve")->assertCreated();
 
-        $this->assertSame('https://sami-superstore.superx.com', $res->json('store_url'));
-        $this->assertStringStartsWith('https://sami-superstore.superx.com/activate?token=', $res->json('activation_url'));
+        $this->assertSame('https://sami-superstore.'.self::BASE_DOMAIN, $res->json('store_url'));
+        $this->assertStringStartsWith('https://sami-superstore.'.self::BASE_DOMAIN.'/activate?token=', $res->json('activation_url'));
+        $this->createdTenantIds[] = $res->json('business_id');
+    }
+
+    /**
+     * The production failure this refactor exists to prevent: a deploy with no
+     * `SUPERX_FRONTEND_URL` (or one that still carries the development value
+     * baked in from a `.env` inside the image) must never surface
+     * `{sub}.localhost:3000` links in the owner dashboard.
+     */
+    public function test_store_urls_stay_on_the_base_domain_when_the_frontend_url_is_unset(): void
+    {
+        config([
+            'superx.frontend_url' => '',
+            'superx.dev_tenant_subdomains' => false,
+        ]);
+
+        $leadId = $this->submitLead();
+        $this->actingAsOwner();
+
+        $res = $this->postJson("/api/v1/platform/leads/{$leadId}/approve")->assertCreated();
+
+        $this->assertSame('https://sami-superstore.'.self::BASE_DOMAIN, $res->json('store_url'));
+        $this->assertStringStartsWith('https://sami-superstore.'.self::BASE_DOMAIN.'/activate?token=', $res->json('activation_url'));
+        $this->assertStringNotContainsString('localhost', (string) $res->json('store_url'));
+        $this->assertStringNotContainsString('localhost', (string) $res->json('activation_url'));
+        $this->createdTenantIds[] = $res->json('business_id');
+
+        // The stored domain is the base domain too — this is the column that
+        // decides tenant resolution, so it must not depend on the frontend env.
+        $this->assertSame('sami-superstore.'.self::BASE_DOMAIN, Domain::where('tenant_id', $res->json('business_id'))->value('domain'));
+
+        // The tenant directory payload is what SuperAdmin renders.
+        $directory = $this->getJson('/api/v1/platform/tenants')->assertOk();
+        $this->assertSame('https://sami-superstore.'.self::BASE_DOMAIN, $directory->json('tenants.0.store_url'));
+    }
+
+    /**
+     * Dev subdomains are opt-in per environment: even with the loopback
+     * frontend origin present, a production environment must not collapse
+     * tenant URLs onto `.localhost`.
+     */
+    public function test_dev_subdomain_collapse_is_disabled_outside_local_environments(): void
+    {
+        config(['superx.dev_tenant_subdomains' => false]);
+
+        $leadId = $this->submitLead();
+        $this->actingAsOwner();
+
+        $res = $this->postJson("/api/v1/platform/leads/{$leadId}/approve")->assertCreated();
+
+        $this->assertSame('http://sami-superstore.'.self::BASE_DOMAIN, $res->json('store_url'));
         $this->createdTenantIds[] = $res->json('business_id');
     }
 
@@ -344,7 +403,7 @@ class OnboardingWorkflowTest extends TestCase
         $this->getJson('/api/v1/activate/'.$token->token)->assertOk()
             ->assertJsonPath('business.name', 'Sami Superstore')
             ->assertJsonPath('business.subdomain', 'sami-superstore')
-            ->assertJsonPath('business.domain', 'sami-superstore.superx.com')
+            ->assertJsonPath('business.domain', 'sami-superstore.superx.test')
             ->assertJsonPath('business.contact.email', 'sami@superstore.test')
             ->assertJsonPath('business.business_type.slug', 'supermarket');
 
@@ -512,7 +571,7 @@ class OnboardingWorkflowTest extends TestCase
         $subdomain = $tenant->subdomain;
 
         $res = $this->postJson('/api/v1/tenant-login', [
-            'host' => $subdomain.'.superx.com',
+            'host' => $subdomain.'.superx.test',
             'username' => 'sami',
             'password' => 'StrongPass9!',
         ])->assertOk();
@@ -549,14 +608,14 @@ class OnboardingWorkflowTest extends TestCase
         $subdomain = $tenant->subdomain;
 
         $this->postJson('/api/v1/tenant-login', [
-            'host' => $subdomain.'.superx.com',
+            'host' => $subdomain.'.superx.test',
             'username' => 'sami',
             'password' => 'WrongPass1!',
         ])->assertStatus(422)->assertJsonValidationErrors(['username']);
 
         // Unknown host.
         $this->postJson('/api/v1/tenant-login', [
-            'host' => 'nowhere.superx.com',
+            'host' => 'nowhere.superx.test',
             'username' => 'x',
             'password' => 'StrongPass9!',
         ])->assertStatus(422)->assertJsonValidationErrors(['host']);
@@ -572,7 +631,7 @@ class OnboardingWorkflowTest extends TestCase
         $this->createdTenantIds[] = (string) $token->tenant_id;
 
         $login = $this->postJson('/api/v1/tenant-login', [
-            'host' => 'sami-superstore.superx.com',
+            'host' => 'sami-superstore.superx.test',
             'username' => 'x',
             'password' => 'StrongPass9!',
         ])->assertStatus(422);
@@ -590,7 +649,7 @@ class OnboardingWorkflowTest extends TestCase
         // The activation wizard's root admin authenticates through the store
         // subdomain; that central token calls the Users API.
         $adminLogin = $this->postJson('/api/v1/tenant-login', [
-            'host' => $subdomain.'.superx.com',
+            'host' => $subdomain.'.superx.test',
             'username' => 'sami',
             'password' => 'StrongPass9!',
         ])->assertOk();
@@ -628,7 +687,7 @@ class OnboardingWorkflowTest extends TestCase
 
         // qusai_cash signs in through the store subdomain.
         $this->postJson('/api/v1/tenant-login', [
-            'host' => $subdomain.'.superx.com',
+            'host' => $subdomain.'.superx.test',
             'username' => 'qusai_cash',
             'password' => 'StrongPass9!',
         ])->assertOk()
@@ -660,14 +719,14 @@ class OnboardingWorkflowTest extends TestCase
         $this->assertNull($oldStillThere, 'pre-update username removed from tenant store');
 
         $this->postJson('/api/v1/tenant-login', [
-            'host' => $subdomain.'.superx.com',
+            'host' => $subdomain.'.superx.test',
             'username' => 'qusai_cash2',
             'password' => 'NewPass9!',
         ])->assertOk()
             ->assertJsonPath('user.role', 'cashier');
 
         $this->postJson('/api/v1/tenant-login', [
-            'host' => $subdomain.'.superx.com',
+            'host' => $subdomain.'.superx.test',
             'username' => 'qusai_cash',
             'password' => 'StrongPass9!',
         ])->assertStatus(422);
@@ -688,7 +747,7 @@ class OnboardingWorkflowTest extends TestCase
         );
 
         $loginA = $this->postJson('/api/v1/tenant-login', [
-            'host' => $tenantA->subdomain.'.superx.com',
+            'host' => $tenantA->subdomain.'.superx.test',
             'username' => 'sami',
             'password' => 'StrongPass9!',
         ])->assertOk();
@@ -706,7 +765,7 @@ class OnboardingWorkflowTest extends TestCase
             ])->assertCreated();
 
         $loginB = $this->postJson('/api/v1/tenant-login', [
-            'host' => $tenantB->subdomain.'.superx.com',
+            'host' => $tenantB->subdomain.'.superx.test',
             'username' => 'sami',
             'password' => 'StrongPass9!',
         ])->assertOk();
@@ -726,13 +785,13 @@ class OnboardingWorkflowTest extends TestCase
 
         // Each signs in through its OWN subdomain with its OWN role.
         $this->postJson('/api/v1/tenant-login', [
-            'host' => $tenantA->subdomain.'.superx.com',
+            'host' => $tenantA->subdomain.'.superx.test',
             'username' => 'qusai_cash',
             'password' => 'StrongPass9!',
         ])->assertOk()->assertJsonPath('user.role', 'staff');
 
         $this->postJson('/api/v1/tenant-login', [
-            'host' => $tenantB->subdomain.'.superx.com',
+            'host' => $tenantB->subdomain.'.superx.test',
             'username' => 'qusai_cash',
             'password' => 'StrongPass9!',
         ])->assertOk()->assertJsonPath('user.role', 'cashier');
@@ -806,7 +865,7 @@ class OnboardingWorkflowTest extends TestCase
 
         $res = $this->postJson("/api/v1/platform/leads/{$leadId}/approve")->assertCreated();
 
-        $this->assertSame('sami-superstore.superx.com', $res->json('domain'));
+        $this->assertSame('sami-superstore.superx.test', $res->json('domain'));
         $this->createdTenantIds[] = $res->json('business_id');
 
         $lead = Lead::find($leadId);
@@ -831,7 +890,7 @@ class OnboardingWorkflowTest extends TestCase
         $tenant = collect($res->json('tenants'))->firstWhere('id', $businessId);
         $this->assertNotNull($tenant);
         $this->assertSame('sami-superstore', $tenant['subdomain']);
-        $this->assertSame('sami-superstore.superx.com', $tenant['domain']);
+        $this->assertSame('sami-superstore.superx.test', $tenant['domain']);
         $this->assertSame('tenant'.$businessId, $tenant['database']);
         $this->assertSame('http://sami-superstore.localhost:3000', $tenant['store_url']);
         $this->assertSame('Sami Owner', $tenant['owner_contact']['name']);
@@ -933,7 +992,7 @@ class OnboardingWorkflowTest extends TestCase
         // i.e. the id of the mirror Business — exactly like the workflow tests.
         $retail = Tenant::find(Business::where('slug', 'super-retail')->firstOrFail()->id);
         $this->postJson('/api/v1/tenant-login', [
-            'host' => 'super-retail.superx.com',
+            'host' => 'super-retail.superx.test',
             'username' => 'retail_admin',
             'password' => 'password',
         ])->assertOk()

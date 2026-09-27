@@ -126,6 +126,15 @@ function qs(params: Record<string, string | number | undefined>): string {
 
 const BASE_DOMAIN = process.env.NEXT_PUBLIC_SUPERX_BASE_DOMAIN;
 
+/** `brillivo.superx-erp.com` -> `brillivo` (falls back to the first label). */
+function subdomainOf(domain: string): string {
+  const host = domain.replace(/^[a-z]+:\/\//i, "").replace(/:\d+$/, "").replace(/\/.*$/, "");
+  if (BASE_DOMAIN && host.toLowerCase().endsWith("." + BASE_DOMAIN.toLowerCase())) {
+    return host.slice(0, -(BASE_DOMAIN.length + 1));
+  }
+  return host.split(".")[0] ?? host;
+}
+
 export function resolveTenantHost(): string | null {
   if (typeof window === "undefined") return null;
   const hostParam = new URLSearchParams(window.location.search).get("host");
@@ -139,17 +148,21 @@ export function resolveTenantHost(): string | null {
 }
 
 export function storeLoginUrl(domain: string): string {
-  if (typeof window === "undefined") return `https://${domain}/login`;
-  const local =
-    ["localhost", "127.0.0.1"].includes(window.location.hostname) ||
-    window.location.hostname.endsWith(".localhost");
-  if (local) {
-    // Keep dev on the local origin: http://{subdomain}.localhost:{port}/login
-    const subdomain = domain.split(".")[0];
-    const port = window.location.port ? `:${window.location.port}` : "";
-    return `${window.location.protocol}//${subdomain}.localhost${port}/login`;
+  // Derive the scheme and host from the configured base domain rather than the
+  // current origin: this is reached from the activation page and the owner
+  // dashboard, which run on the central app, so the current host is not the
+  // tenant's. Only a loopback origin (local dev) swaps in `.localhost`.
+  if (typeof window !== "undefined") {
+    const local =
+      ["localhost", "127.0.0.1"].includes(window.location.hostname) ||
+      window.location.hostname.endsWith(".localhost");
+    if (local) {
+      const port = window.location.port ? `:${window.location.port}` : "";
+      return `${window.location.protocol}//${subdomainOf(domain)}.localhost${port}/login`;
+    }
   }
-  return `${window.location.protocol}//${domain}/login`;
+  const scheme = process.env.NODE_ENV === "production" ? "https" : window.location.protocol.replace(":", "");
+  return `${scheme}://${domain}/login`;
 }
 
 // ─── Auth ──────────────────────────────────────────────
