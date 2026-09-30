@@ -15,6 +15,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Icons come from the app/ file conventions (Next.js injects them on every
+// route, cache-busted): favicon.ico (16/32/48/64), icon.png (128), and
+// apple-icon.png (180, flattened onto white). Declaring `icons` here as well
+// would duplicate each <link rel="icon"> and defeat the cache-busting hashes.
+// All three are square crops of the brand mark — never /images/logobg.png,
+// whose 677x369 canvas renders the mark at only ~5.6px in a 16px tab.
 export const metadata: Metadata = {
   title: "SuperxERP - Multi-Tenant SaaS ERP",
   description: "Enterprise ERP for the Arab market",

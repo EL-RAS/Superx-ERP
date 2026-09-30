@@ -47,6 +47,34 @@ class OnboardingService
         return strtolower((string) config('superx.tenant_domain'));
     }
 
+    /**
+     * Credential-free lookup that tells a real tenant subdomain apart from a
+     * typo, so the frontend login page can render a "store not found" state
+     * instead of a login form on an address that will never work.
+     *
+     * Deliberately exposes only storefront-public data (the shop name is
+     * already public on the tenant's own subdomain) and deliberately returns
+     * `null` rather than throwing, so callers can treat "unknown host" as a
+     * normal outcome.
+     */
+    public function resolveTenantStore(string $host): ?array
+    {
+        $tenant = $this->resolveTenantByHost($host);
+
+        if (! $tenant) {
+            return null;
+        }
+
+        $businessId = (string) $tenant->business_id;
+
+        return [
+            'subdomain' => $tenant->subdomain,
+            'business_id' => $businessId,
+            'business_name' => $tenant->shop['name'] ?? null,
+            'activated' => (bool) $tenant->activated_at,
+        ];
+    }
+
     public function normalizeSubdomain(string $subdomain): string
     {
         return strtolower(trim($subdomain));

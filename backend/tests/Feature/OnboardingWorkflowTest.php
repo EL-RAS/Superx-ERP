@@ -565,6 +565,49 @@ class OnboardingWorkflowTest extends TestCase
         return $tenant;
     }
 
+    public function test_tenant_resolve_reports_a_registered_store(): void
+    {
+        $tenant = $this->activatedTenant('resolve-shop');
+
+        $res = $this->getJson('/api/v1/tenant/resolve?host='.$tenant->subdomain.'.'.self::BASE_DOMAIN)
+            ->assertOk();
+
+        $this->assertTrue($res->json('valid'));
+        $this->assertSame('resolve-shop', $res->json('subdomain'));
+        $this->assertSame((string) $tenant->id, $res->json('business_id'));
+        $this->assertTrue($res->json('activated'));
+        // Storefront-public only: never leak the tenant DB name.
+        $this->assertNull($res->json('tenant_database'));
+    }
+
+    public function test_tenant_resolve_reports_an_unregistered_subdomain_as_not_found(): void
+    {
+        $this->getJson('/api/v1/tenant/resolve?host=typo-store.'.self::BASE_DOMAIN)
+            ->assertNotFound()
+            ->assertJsonPath('valid', false);
+
+        // The central domain is never a tenant, even though it resolves.
+        $this->getJson('/api/v1/tenant/resolve?host='.self::BASE_DOMAIN)
+            ->assertNotFound()
+            ->assertJsonPath('valid', false);
+    }
+
+    public function test_tenant_resolve_flags_a_provisioned_but_unactivated_store(): void
+    {
+        $leadId = $this->submitLead([
+            'subdomain' => 'pending-shop',
+            'email' => 'pending@pending-shop.test',
+        ]);
+        $this->actingAsOwner();
+        $this->postJson("/api/v1/platform/leads/{$leadId}/approve")->assertCreated();
+
+        $res = $this->getJson('/api/v1/tenant/resolve?host=pending-shop.'.self::BASE_DOMAIN)
+            ->assertOk();
+
+        $this->assertTrue($res->json('valid'));
+        $this->assertFalse($res->json('activated'));
+    }
+
     public function test_tenant_login_verifies_credentials_and_returns_central_token(): void
     {
         $tenant = $this->activatedTenant();

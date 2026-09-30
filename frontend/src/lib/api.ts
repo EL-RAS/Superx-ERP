@@ -72,6 +72,7 @@ import {
   SupplierLedger,
 } from "./types";
 import { removeAuthCookie } from "@/lib/cookie";
+import { CENTRAL_DOMAIN, normalizeHost, tenantSubdomainOf } from "@/lib/tenant-host";
 
 export type {
   BusinessTypeItem,
@@ -124,12 +125,12 @@ function qs(params: Record<string, string | number | undefined>): string {
   return entries.length ? "?" + entries.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&") : "";
 }
 
-const BASE_DOMAIN = process.env.NEXT_PUBLIC_SUPERX_BASE_DOMAIN;
+const BASE_DOMAIN = CENTRAL_DOMAIN;
 
 /** `brillivo.superx-erp.com` -> `brillivo` (falls back to the first label). */
 function subdomainOf(domain: string): string {
-  const host = domain.replace(/^[a-z]+:\/\//i, "").replace(/:\d+$/, "").replace(/\/.*$/, "");
-  if (BASE_DOMAIN && host.toLowerCase().endsWith("." + BASE_DOMAIN.toLowerCase())) {
+  const host = normalizeHost(domain);
+  if (BASE_DOMAIN && host.endsWith("." + BASE_DOMAIN)) {
     return host.slice(0, -(BASE_DOMAIN.length + 1));
   }
   return host.split(".")[0] ?? host;
@@ -139,12 +140,42 @@ export function resolveTenantHost(): string | null {
   if (typeof window === "undefined") return null;
   const hostParam = new URLSearchParams(window.location.search).get("host");
   if (hostParam) return hostParam;
-  const host = window.location.hostname;
-  if (BASE_DOMAIN && host !== BASE_DOMAIN && host.endsWith("." + BASE_DOMAIN)) return host;
-  // Local dev: `{subdomain}.localhost` (e.g. brillivo.localhost) is the tenant
-  // host equivalent of `{subdomain}.{BASE_DOMAIN}` in production.
-  if (host !== "localhost" && host.endsWith(".localhost")) return host;
-  return null;
+  // Same host test the Edge middleware uses, so the two always agree on
+  // whether this origin is a storefront.
+  const host = normalizeHost(window.location.hostname);
+  return tenantSubdomainOf(host) ? host : null;
+}
+
+/**
+ * Outcome of the host probe. `null` means *unknown* — the backend was
+ * unreachable or returned something unexpected — and callers must fail OPEN so
+ * a backend hiccup never locks a real merchant out of their own login page.
+ * `{ valid: false }` is the only definitive "no such store".
+ */
+export interface TenantResolveResult {
+  valid: boolean;
+  subdomain?: string;
+  business_id?: string;
+  business_name?: string | null;
+  activated?: boolean;
+  message?: string;
+}
+
+export async function fetchTenantResolve(host: string): Promise<TenantResolveResult | null> {
+  try {
+    const res = await fetch(`${API_BASE}/tenant/resolve${qs({ host })}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (res.status === 404) return { valid: false };
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    return typeof data?.valid === "boolean" ? (data as TenantResolveResult) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function storeLoginUrl(domain: string): string {

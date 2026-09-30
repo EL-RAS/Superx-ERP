@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuthStore } from "@/stores/auth-store";
-import { loginRequest, tenantLogin, resolveTenantHost, ApiError } from "@/lib/api";
+import { loginRequest, tenantLogin, resolveTenantHost, fetchTenantResolve, ApiError } from "@/lib/api";
+import { centralSiteUrl } from "@/lib/tenant-host";
 import type { LoginResponse, TenantLoginResponse } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 import { User, Lock, Eye, EyeOff, ArrowRight, Loader2, AlertCircle, ExternalLink } from "lucide-react";
@@ -87,8 +88,26 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activation, setActivation] = useState<{ url: string; business_name?: string } | null>(null);
+  // Definitive "no store is registered for this subdomain". Left `null` whenever
+  // the probe could not answer, so a backend outage never blocks a real
+  // merchant — they just get the normal login form.
+  const [unknownStore, setUnknownStore] = useState(false);
 
-  const canSubmit = username.length >= 3 && password.length >= 8 && !submitting;
+  useEffect(() => {
+    const tenantHost = resolveTenantHost();
+    if (!tenantHost) return;
+
+    let cancelled = false;
+    fetchTenantResolve(tenantHost).then((result) => {
+      if (!cancelled && result && !result.valid) setUnknownStore(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const canSubmit = username.length >= 3 && password.length >= 8 && !submitting && !unknownStore;
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -225,6 +244,24 @@ export default function LoginPage() {
               </p>
             </div>
 
+            {unknownStore ? (
+              <div className="space-y-5">
+                <div className="p-4 rounded-2xl bg-danger/10 border border-danger/20 text-danger text-xs flex items-start gap-2.5 backdrop-blur-sm">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-1.5 tracking-wide">
+                    <p className="font-semibold">{t("auth.store_not_found")}</p>
+                    <p className="text-danger/80">{t("auth.store_not_found_hint")}</p>
+                  </div>
+                </div>
+                <a
+                  href={centralSiteUrl()}
+                  className="w-full py-4 rounded-2xl font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2.5 tracking-wide bg-gradient-to-r from-[#1E4E8C] to-[#3A75C4] text-white hover:from-[#3A75C4] hover:to-[#1E4E8C] shadow-lg shadow-[#1E4E8C]/20 hover:shadow-[#1E4E8C]/30"
+                >
+                  {t("auth.go_to_central_site")}
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+            ) : (
             <div
               className="space-y-4"
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
@@ -317,6 +354,7 @@ export default function LoginPage() {
                 )}
               </motion.button>
             </div>
+            )}
           </div>
         </motion.div>
 

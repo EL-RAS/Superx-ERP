@@ -2682,6 +2682,9 @@ export const enDict: Record<string, string> = {
   "activate.activate_store": "Activate store now",
 
   "auth.needs_activation": "This store hasn't been activated yet. Use your activation link to set it up.",
+  "auth.store_not_found": "Store not found",
+  "auth.store_not_found_hint": "No store is registered at this address. Check the link, or go back to the main site.",
+  "auth.go_to_central_site": "Go to SuperxERP.com",
 
   "superadmin.tab_tenants": "Tenants",
   "superadmin.tab_leads": "Leads",
@@ -5296,6 +5299,9 @@ export const arDict: Record<string, string> = {
   "activate.activate_store": "فعّل متجرك الآن",
 
   "auth.needs_activation": "لم يتم تفعيل هذا المتجر بعد. استخدم رابط التفعيل الخاص بك لإعداده.",
+  "auth.store_not_found": "المتجر غير موجود",
+  "auth.store_not_found_hint": "لا يوجد متجر مسجل على هذا العنوان. تحقق من الرابط، أو عد إلى الموقع الرئيسي.",
+  "auth.go_to_central_site": "الذهاب إلى SuperxERP.com",
 
   "superadmin.tab_tenants": "المستأجرون",
   "superadmin.tab_leads": "الطلبات",

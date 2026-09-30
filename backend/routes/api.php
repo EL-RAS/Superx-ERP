@@ -73,6 +73,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/activate/{token}', [ActivationController::class, 'show'])->name('activate.show');
     Route::post('/activate', [ActivationController::class, 'store'])->name('activate.store');
     Route::post('/tenant-login', [TenantAuthController::class, 'login'])->name('tenant.login');
+    Route::get('/tenant/resolve', [TenantAuthController::class, 'resolve'])->name('tenant.resolve');
 
     // ─── SuperX Owner Portal (platform administration) ──────────
     // Strictly guarded: `superx_owner` role or the SUPERX_OWNER_SECRET env key.

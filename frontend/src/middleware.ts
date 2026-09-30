@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { tenantSubdomainOf } from "@/lib/tenant-host";
 
 const AUTH_COOKIE = "sx_auth";
 const LOCALE_COOKIE = "sx_locale";
@@ -48,12 +49,31 @@ export function middleware(request: NextRequest) {
 
   const url = request.nextUrl.clone();
 
+  // Behind a proxy the socket host is the proxy's, so prefer the forwarded one.
+  const tenant = tenantSubdomainOf(
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host")
+  );
+
   // The auth guard runs against the resolved route, so `/ar` is recognised as
   // the landing page rather than falling through as an unknown path.
   if (token && GUARDED_ROUTES.includes(route)) {
     url.pathname = "/dashboard";
 
     return withLocale(NextResponse.redirect(url), locale);
+  }
+
+  // A tenant subdomain must never render the central marketing page: hitting
+  // `tt.superx-erp.com` with no explicit path has to land on that store's
+  // login, not on `app/page.tsx`. Rewritten (not redirected) so the store root
+  // stays the canonical URL. This is a pure host comparison — deliberately no
+  // lookup, so page delivery never depends on a backend round-trip. An
+  // unregistered subdomain still renders the login form; the backend rejects
+  // it on submit and `TenantAuthController::resolve()` lets the login page show
+  // a "store not found" state up front.
+  if (tenant && route === "/") {
+    url.pathname = "/login";
+
+    return withLocale(NextResponse.rewrite(url), locale);
   }
 
   if (locale) {

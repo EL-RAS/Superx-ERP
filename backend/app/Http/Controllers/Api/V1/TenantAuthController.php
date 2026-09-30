@@ -36,4 +36,31 @@ class TenantAuthController extends Controller
 
         return response()->json($result, $status);
     }
+
+    /**
+     * Public, credential-free host probe.
+     *
+     * Lets the frontend tell an unregistered subdomain from a typo before
+     * showing a login form. Returns 404 for an unknown host, which is the
+     * signal the login page keys off — never render the central landing page
+     * or a dead form on a host that has no store behind it.
+     */
+    public function resolve(Request $request, OnboardingService $onboarding): JsonResponse
+    {
+        $host = $request->query('host')
+            ?? $request->headers->get('X-Forwarded-Host')
+            ?? $request->headers->get('Host')
+            ?? '';
+
+        $store = $onboarding->resolveTenantStore($host);
+
+        if (! $store) {
+            return response()->json([
+                'valid' => false,
+                'message' => 'No store is registered for this address.',
+            ], 404);
+        }
+
+        return response()->json(['valid' => true] + $store);
+    }
 }
