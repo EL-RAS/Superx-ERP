@@ -683,6 +683,42 @@ class OnboardingWorkflowTest extends TestCase
         $this->assertIsString($login->json('activation_url'));
     }
 
+    public function test_first_tenant_login_receives_a_one_time_welcome_alert(): void
+    {
+        $tenant = $this->activatedTenant();
+        $host = $tenant->subdomain.'.'.self::BASE_DOMAIN;
+
+        $first = $this->postJson('/api/v1/tenant-login', [
+            'host' => $host,
+            'username' => 'sami',
+            'password' => 'StrongPass9!',
+        ])->assertOk();
+
+        auth('sanctum')->forgetUser();
+
+        $user = User::withoutBusiness()->find($first->json('user.id'));
+        $this->assertNotNull($user);
+
+        $welcome = $user->notifications()->where('data->tag', 'welcome')->first();
+        $this->assertNotNull($welcome, 'The first login must raise the welcome alert.');
+        $this->assertSame('info', $welcome->data['severity']);
+        $this->assertArrayHasKey('en', $welcome->data['title']);
+        $this->assertArrayHasKey('ar', $welcome->data['title']);
+        $this->assertSame('/dashboard', $welcome->data['action_url']);
+
+        // Repeat logins stay silent — "first time" means first time, even if
+        // the alert has already been read.
+        $welcome->markAsRead();
+
+        $this->postJson('/api/v1/tenant-login', [
+            'host' => $host,
+            'username' => 'sami',
+            'password' => 'StrongPass9!',
+        ])->assertOk();
+
+        $this->assertSame(1, $user->notifications()->where('data->tag', 'welcome')->count());
+    }
+
     public function test_user_created_via_users_api_can_login_through_tenant_subdomain(): void
     {
         $tenant = $this->activatedTenant();

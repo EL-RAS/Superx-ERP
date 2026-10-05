@@ -1,98 +1,98 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/lib/i18n";
-import { motion, AnimatePresence } from "framer-motion";
+import { useAuthStore } from "@/stores/auth-store";
+import type { AppNotification } from "@/lib/types";
+import {
+  clearNotifications,
+  fetchNotifications,
+  fetchUnreadNotificationCount,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from "@/lib/api";
 
-interface Notification {
-  id: number;
-  title: string;
-  title_ar: string;
-  message: string;
-  message_ar: string;
-  time: string;
-  time_ar: string;
-  type: "warning" | "info" | "danger";
-  read: boolean;
-}
-
-const INITIAL_NOTIFICATIONS: Notification[] = [
-  {
-    id: 1,
-    title: "Low Stock Alert",
-    title_ar: "تنبيح: مخزون منخفض",
-    message: "iPhone 15 Pro Max — 3 units remaining",
-    message_ar: "آيفون 15 برو ماكس — 3 وحدات متبقية",
-    time: "5 min ago",
-    time_ar: "منذ 5 دقائق",
-    type: "warning",
-    read: false,
-  },
-  {
-    id: 2,
-    title: "Pending Invoice",
-    title_ar: "فاتورة معلقة",
-    message: "INV-2026-0041 — JOD 1,250.00 awaiting payment",
-    message_ar: "فاتورة INV-2026-0041 — 1,250.00 د.أ بانتظار الدفع",
-    time: "12 min ago",
-    time_ar: "منذ 12 دقيقة",
-    type: "danger",
-    read: false,
-  },
-  {
-    id: 3,
-    title: "System Update",
-    title_ar: "تحديث النظام",
-    message: "New version v2.4.0 is available for download",
-    message_ar: "الإصدار الجديد v2.4.0 متاح للتحميل",
-    time: "1 hour ago",
-    time_ar: "منذ ساعة",
-    type: "info",
-    read: false,
-  },
-  {
-    id: 4,
-    title: "Low Stock Alert",
-    title_ar: "تنبيح: مخزون منخفض",
-    message: "Samsung Galaxy S24 — 5 units remaining",
-    message_ar: "سامسونج جالكسي S24 — 5 وحدات متبقية",
-    time: "2 hours ago",
-    time_ar: "منذ ساعتين",
-    type: "warning",
-    read: true,
-  },
-  {
-    id: 5,
-    title: "New Customer Registered",
-    title_ar: "عميل جديد مسجل",
-    message: "Ahmad Al-Khatib joined as a wholesale customer",
-    message_ar: "أحمد الخطيب انضم كعميل جملة",
-    time: "3 hours ago",
-    time_ar: "منذ 3 ساعات",
-    type: "info",
-    read: true,
-  },
-];
-
-const TYPE_STYLES: Record<string, string> = {
+const SEVERITY_STYLES: Record<string, string> = {
   warning: "bg-amber-500/15 text-amber-500",
   danger: "bg-red-500/15 text-red-500",
   info: "bg-blue-500/15 text-blue-500",
 };
 
-const TYPE_DOT: Record<string, string> = {
+const SEVERITY_DOT: Record<string, string> = {
   warning: "bg-amber-500",
   danger: "bg-red-500",
   info: "bg-blue-500",
 };
 
+function severityStyle(severity: string): string {
+  return SEVERITY_STYLES[severity] ?? SEVERITY_STYLES.info;
+}
+
+function severityDot(severity: string): string {
+  return SEVERITY_DOT[severity] ?? SEVERITY_DOT.info;
+}
+
+/** Server timestamps arrive as ISO-8601 UTC; render them in the reader's locale. */
+function relativeTime(iso: string | null, locale: string): string {
+  if (!iso) return "";
+
+  const date = new Date(iso);
+  const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+  if (Number.isNaN(seconds)) return "";
+
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const abs = Math.abs(seconds);
+
+  if (abs < 60) return rtf.format(seconds, "second");
+  if (abs < 3600) return rtf.format(Math.round(seconds / 60), "minute");
+  if (abs < 86400) return rtf.format(Math.round(seconds / 3600), "hour");
+  if (abs < 2592000) return rtf.format(Math.round(seconds / 86400), "day");
+
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
+}
+
 export default function NotificationsDropdown() {
   const { locale, t } = useI18n();
+  const router = useRouter();
+  const { token, business } = useAuthStore();
+
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+  const [items, setItems] = useState<AppNotification[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const bizId = business?.id;
+
+  // The badge is cosmetic: a failed poll must never break the header.
+  const loadBadge = useCallback(() => {
+    if (!token || !bizId) return;
+    fetchUnreadNotificationCount(token, bizId)
+      .then((res) => setUnread(res.unread_count))
+      .catch(() => undefined);
+  }, [token, bizId]);
+
+  const loadList = useCallback(() => {
+    if (!token || !bizId) return;
+    setLoading(true);
+    setError(false);
+    fetchNotifications(token, bizId, { per_page: 15 })
+      .then((res) => {
+        setItems(res.data);
+        setUnread(res.unread_count);
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, [token, bizId]);
+
+  useEffect(() => {
+    loadBadge();
+    window.addEventListener("focus", loadBadge);
+    return () => window.removeEventListener("focus", loadBadge);
+  }, [loadBadge]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -104,19 +104,56 @@ export default function NotificationsDropdown() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  function markAsRead(id: number) {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
+  function toggleOpen() {
+    const next = !open;
+    setOpen(next);
+    if (next) loadList();
+  }
+
+  function markAsRead(id: string) {
+    if (!token || !bizId) return;
+
+    const target = items.find((n) => n.id === id);
+    if (!target || target.read) return;
+
+    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    setUnread((prev) => Math.max(0, prev - 1));
+
+    markNotificationRead(token, bizId, id)
+      .then((res) => setUnread(res.unread_count))
+      .catch(() => loadList());
+  }
+
+  function openNotification(n: AppNotification) {
+    markAsRead(n.id);
+
+    if (n.action_url && n.action_url.startsWith("/")) {
+      setOpen(false);
+      router.push(n.action_url);
+    }
   }
 
   function markAllRead() {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    if (!token || !bizId || unread === 0) return;
+
+    setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnread(0);
+
+    markAllNotificationsRead(token, bizId)
+      .then((res) => setUnread(res.unread_count))
+      .catch(() => loadList());
   }
 
   function clearAll() {
-    setNotifications([]);
+    if (!token || !bizId) return;
+
+    setItems([]);
+    setUnread(0);
     setOpen(false);
+
+    clearNotifications(token, bizId)
+      .then((res) => setUnread(res.unread_count))
+      .catch(() => loadList());
   }
 
   const isAr = locale === "ar";
@@ -124,16 +161,16 @@ export default function NotificationsDropdown() {
   return (
     <div className="relative" ref={dropdownRef}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={toggleOpen}
         className="relative p-2 rounded-lg text-muted hover:bg-accent-dim hover:text-accent transition-colors"
         title={t("topbar.notifications")}
       >
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
         </svg>
-        {unreadCount > 0 && (
+        {unread > 0 && (
           <span className="absolute -top-0.5 -end-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-danger text-[10px] font-bold text-foreground px-1">
-            {unreadCount}
+            {unread > 99 ? "99+" : unread}
           </span>
         )}
       </button>
@@ -149,42 +186,55 @@ export default function NotificationsDropdown() {
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <h3 className="text-sm font-semibold text-foreground">{t("topbar.notifications")}</h3>
-              {unreadCount > 0 && (
-                <button
-                  onClick={markAllRead}
-                  className="text-[11px] text-primary hover:underline"
-                >
+              {unread > 0 && !loading && !error && (
+                <button onClick={markAllRead} className="text-[11px] text-primary hover:underline">
                   {t("topbar.mark_all_read")}
                 </button>
               )}
             </div>
 
             <div className="max-h-80 overflow-y-auto">
-              {notifications.length === 0 ? (
+              {loading ? (
+                <div className="px-4 py-8 text-center text-sm text-muted">{t("common.loading")}</div>
+              ) : error ? (
+                <div className="px-4 py-8 text-center">
+                  <p className="text-sm text-muted mb-3">{t("topbar.load_failed")}</p>
+                  <button
+                    onClick={loadList}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    {t("common.refresh")}
+                  </button>
+                </div>
+              ) : items.length === 0 ? (
                 <div className="px-4 py-8 text-center text-sm text-muted">
                   {t("topbar.no_notifications")}
                 </div>
               ) : (
-                notifications.map((n) => (
+                items.map((n) => (
                   <div
                     key={n.id}
-                    onClick={() => markAsRead(n.id)}
+                    onClick={() => openNotification(n)}
                     className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-accent-dim ${
                       !n.read ? "bg-accent/5" : ""
                     }`}
                   >
-                    <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${!n.read ? TYPE_DOT[n.type] : "bg-transparent"}`} />
+                    <div
+                      className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${!n.read ? severityDot(n.severity) : "bg-transparent"}`}
+                    />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${TYPE_STYLES[n.type]}`}>
-                          {isAr ? n.title_ar : n.title}
+                        <span
+                          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${severityStyle(n.severity)}`}
+                        >
+                          {n.title[isAr ? "ar" : "en"] ?? n.title.en}
                         </span>
                       </div>
                       <p className="text-xs text-foreground mt-1 line-clamp-2">
-                        {isAr ? n.message_ar : n.message}
+                        {n.message[isAr ? "ar" : "en"] ?? n.message.en}
                       </p>
                       <p className="text-[11px] text-muted mt-1">
-                        {isAr ? n.time_ar : n.time}
+                        {relativeTime(n.created_at, locale)}
                       </p>
                     </div>
                   </div>
@@ -192,7 +242,7 @@ export default function NotificationsDropdown() {
               )}
             </div>
 
-            {notifications.length > 0 && (
+            {!loading && !error && items.length > 0 && (
               <div className="flex items-center justify-center px-4 py-2.5 border-t border-border">
                 <button
                   onClick={clearAll}

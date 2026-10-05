@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\V1\Jewelry\RepairTicketController;
 use App\Http\Controllers\Api\V1\JournalEntryController;
 use App\Http\Controllers\Api\V1\LeadController;
 use App\Http\Controllers\Api\V1\LoyaltyController;
+use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PlatformLeadController;
 use App\Http\Controllers\Api\V1\PlatformTenantController;
@@ -98,6 +99,18 @@ Route::prefix('v1')->group(function () {
 
         // Bootstrap
         Route::get('/bootstrap', BootstrapController::class);
+
+        // ─── Notifications ─────────────────────────────────────────
+        // Personal inbox behind auth + business only: every user has a header
+        // badge, so no RBAC module gate applies. Each endpoint is scoped to the
+        // requesting user inside the controller.
+        // NOTE: the literal `/notifications/read` MUST stay registered before
+        // `/notifications/{id}`, otherwise "read" is captured as an id.
+        Route::get('/notifications', [NotificationController::class, 'index']);
+        Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::patch('/notifications/read', [NotificationController::class, 'markAllRead'])->name('notifications.readAll');
+        Route::delete('/notifications', [NotificationController::class, 'clear'])->name('notifications.clear');
+        Route::patch('/notifications/{id}', [NotificationController::class, 'markRead'])->name('notifications.read');
 
         // Dashboard
         Route::get('/dashboard', [DashboardController::class, 'dashboard'])->middleware('permission:dashboard');

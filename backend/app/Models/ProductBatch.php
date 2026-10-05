@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Exceptions\InsufficientStockException;
+use App\Services\NotificationService;
 use App\Traits\BelongsToBusiness;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,6 +19,19 @@ class ProductBatch extends Model
     protected static function booted(): void
     {
         static::bootBelongsToBusiness();
+
+        // Expiry is evaluated as soon as a batch arrives or its window moves;
+        // Condition drift after that (a date reaching its warning window with
+        // nobody saving the row) is caught by NotificationService::sweep().
+        static::created(function (ProductBatch $batch): void {
+            app(NotificationService::class)->checkExpiry($batch);
+        });
+
+        static::updated(function (ProductBatch $batch): void {
+            if ($batch->wasChanged('expiry_date') || $batch->wasChanged('quantity')) {
+                app(NotificationService::class)->checkExpiry($batch);
+            }
+        });
     }
 
     protected $fillable = [

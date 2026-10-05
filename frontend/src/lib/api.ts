@@ -70,6 +70,8 @@ import {
   ReturnablePreview,
   PromotionApplyResult,
   SupplierLedger,
+  AppNotification,
+  NotificationsResponse,
 } from "./types";
 import { removeAuthCookie } from "@/lib/cookie";
 import { CENTRAL_DOMAIN, normalizeHost, tenantSubdomainOf } from "@/lib/tenant-host";
@@ -934,4 +936,34 @@ export function applyPromotions(token: string, bizId: string, data: { items: { p
 // ─── Supermarket: Z-Report ────────────────────────────
 export function fetchZReports(token: string, bizId: string, params?: Record<string, string | number>) {
   return apiFetch<PaginatedResponse<ZReport>>(`${API_BASE}/z-reports${qs(params || {})}`, { headers: authHeaders(token, bizId) });
+}
+
+// ─── Notifications ────────────────────────────────────────
+export function fetchNotifications(token: string, bizId: string, params?: Record<string, string | number>) {
+  return apiFetch<NotificationsResponse>(`${API_BASE}/notifications${qs(params || {})}`, { headers: authHeaders(token, bizId) });
+}
+
+export function fetchUnreadNotificationCount(token: string, bizId: string) {
+  return apiFetch<{ unread_count: number }>(`${API_BASE}/notifications/unread-count`, { headers: authHeaders(token, bizId) });
+}
+
+export function markNotificationRead(token: string, bizId: string, id: string) {
+  return apiFetch<{ notification: AppNotification; unread_count: number }>(`${API_BASE}/notifications/${id}`, {
+    method: "PATCH",
+    headers: authHeaders(token, bizId),
+  });
+}
+
+export function markAllNotificationsRead(token: string, bizId: string) {
+  return apiFetch<{ unread_count: number }>(`${API_BASE}/notifications/read`, {
+    method: "PATCH",
+    headers: authHeaders(token, bizId),
+  });
+}
+
+export function clearNotifications(token: string, bizId: string) {
+  return apiFetch<{ unread_count: number }>(`${API_BASE}/notifications`, {
+    method: "DELETE",
+    headers: authHeaders(token, bizId),
+  });
 }

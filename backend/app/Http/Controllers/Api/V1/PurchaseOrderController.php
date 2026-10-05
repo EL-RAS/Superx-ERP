@@ -12,6 +12,7 @@ use App\Models\SupplierProduct;
 use App\Rules\ProductQuantity;
 use App\Services\AccountingService;
 use App\Services\DocumentNumberService;
+use App\Services\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -189,8 +190,17 @@ class PurchaseOrderController extends Controller
             }
 
             $orderFields = collect($validated)->except('items')->filter()->toArray();
+
+            // "Placed" is approval, not creation: store() always makes a draft
+            // (no commitment yet), and `draft -> ordered` is the only transition
+            // into ordered — so this fires exactly once per purchase order.
+            $justOrdered = false;
+
             if (! empty($orderFields)) {
                 $purchaseOrder->update($orderFields);
+
+                $justOrdered = $purchaseOrder->wasChanged('status')
+                    && $purchaseOrder->status === 'ordered';
             }
 
             if (isset($validated['items'])) {
@@ -213,6 +223,10 @@ class PurchaseOrderController extends Controller
             }
 
             $purchaseOrder->load('items', 'supplier');
+
+            if ($justOrdered) {
+                app(NotificationService::class)->purchaseOrderPlaced($purchaseOrder);
+            }
 
             return response()->json($purchaseOrder);
         });

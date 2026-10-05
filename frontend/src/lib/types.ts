@@ -1512,3 +1512,28 @@ export interface ReturnablePreview {
   };
   items: ReturnableItem[];
 }
+
+// ─── Notifications ────────────────────────────────────────
+export interface AppNotification {
+  id: string;
+  type: string;
+  tag: string | null;
+  severity: string;
+  title: { en: string; ar: string };
+  message: { en: string; ar: string };
+  action_url: string | null;
+  read: boolean;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationsResponse {
+  data: AppNotification[];
+  unread_count: number;
+  meta: {
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+  };
+}

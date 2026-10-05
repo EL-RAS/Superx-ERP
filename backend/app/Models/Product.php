@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\NotificationService;
 use App\Traits\BelongsToBusiness;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,6 +19,16 @@ class Product extends Model
     protected static function booted(): void
     {
         static::bootBelongsToBusiness();
+
+        // The single choke point every stock mutation flows through (sales,
+        // GRNs, adjustments, imports). Emitting here means low/out-of-stock
+        // alerts need no per-controller wiring, and `wasChanged()` keeps the
+        // cost to a boolean for products that are not reorder-tracked.
+        static::updated(function (Product $product): void {
+            if ($product->wasChanged('stock_quantity')) {
+                app(NotificationService::class)->checkStock($product);
+            }
+        });
     }
 
     protected $fillable = [

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Services\NotificationService;
 use App\Services\OnboardingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,8 +16,11 @@ use Illuminate\Http\Request;
  */
 class TenantAuthController extends Controller
 {
-    public function login(Request $request, OnboardingService $onboarding): JsonResponse
-    {
+    public function login(
+        Request $request,
+        OnboardingService $onboarding,
+        NotificationService $notifications,
+    ): JsonResponse {
         $host = $request->input('host')
             ?? $request->headers->get('X-Forwarded-Host')
             ?? $request->headers->get('Host')
@@ -33,6 +38,20 @@ class TenantAuthController extends Controller
         );
 
         $status = isset($result['needs_activation']) ? 422 : 200;
+
+        // This is the only login path available to business users
+        // (AuthController::login is platform-owner only), so it is where the
+        // one-time welcome alert lands. `welcome()` de-duplicates on its tag
+        // regardless of read state, so repeat logins stay silent.
+        if ($status === 200 && isset($result['user']['id'])) {
+            // withoutBusiness() mirrors AuthController: withoutBusiness() keeps
+            // the BusinessScope global scope from filtering the lookup out.
+            $user = User::withoutBusiness()->find($result['user']['id']);
+
+            if ($user) {
+                $notifications->welcome($user);
+            }
+        }
 
         return response()->json($result, $status);
     }

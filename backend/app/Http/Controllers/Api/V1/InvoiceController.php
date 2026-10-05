@@ -17,6 +17,7 @@ use App\Services\AccountingService;
 use App\Services\DocumentNumberService;
 use App\Services\InvoiceService;
 use App\Services\LoyaltyService;
+use App\Services\NotificationService;
 use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -281,6 +282,10 @@ class InvoiceController extends Controller
                     if (config('features.crm_enabled')) {
                         app(LoyaltyService::class)->earnForInvoice($invoice);
                     }
+
+                    // Open documents only — paid/void are filtered out inside
+                    // the service, so cash POS sales never raise an alert.
+                    app(NotificationService::class)->invoiceRequiresAction($invoice);
 
                     return response()->json($invoice, 201);
                 });
