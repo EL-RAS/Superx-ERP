@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion } from "framer-motion";
 import { useAuthStore } from "@/stores/auth-store";
-import { Products, fetchCategories, Warehouses, importProducts } from "@/lib/api";
+import { Products, fetchCategories, Warehouses, importProducts, exportProducts } from "@/lib/api";
 import type { Product, Category, Warehouse } from "@/lib/types";
 import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
@@ -15,7 +15,7 @@ import { Package, Plus, Search, Upload, X, ImageIcon, Loader2, FileSpreadsheet, 
 import { useI18n } from "@/lib/i18n";
 import { isSupermarketVertical } from "@/lib/morphing-engine";
 import { usePagination } from "@/lib/pagination";
-import { downloadCSV } from "@/lib/export";
+import { downloadCSV, triggerDownload } from "@/lib/export";
 
 const emptyForm = {
   name: "",
@@ -64,6 +64,9 @@ export default function ProductsPage() {
   const importFileRef = useRef<HTMLInputElement>(null);
   const [total, setTotal] = useState(0);
   const { page, perPage, setPage, resetPage, changePageSize } = usePagination();
+
+  const [exporting, setExporting] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
 
   const columns: Column[] = [
     { key: "name", label: t("common.name") },
@@ -130,6 +133,12 @@ export default function ProductsPage() {
     fetchCategories(token, business.id).then(setCategories).catch(() => {});
     Warehouses.list(token, business.id).then((res) => setWarehouses(res.data)).catch(() => {});
   }, [token, business]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const getDefaultMinStock = (): string => {
     const slug = business?.business_type?.slug ?? "";
@@ -227,6 +236,21 @@ export default function ProductsPage() {
     setImportError(null);
   };
 
+  const handleExport = async () => {
+    if (!token || !business || exporting) return;
+    setExporting(true);
+    try {
+      const blob = await exportProducts(token, business.id);
+      const day = new Date().toISOString().slice(0, 10);
+      triggerDownload(blob, `products_export_${day}.xlsx`);
+      setToast({ msg: t("products.export_success"), ok: true });
+    } catch (err) {
+      setToast({ msg: err instanceof Error ? err.message : t("products.export_failed"), ok: false });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleImport = async () => {
     if (!token || !business || !importFile) return;
     setImporting(true);
@@ -298,6 +322,18 @@ export default function ProductsPage() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+      {toast && (
+        <div
+          className={`fixed top-4 end-4 z-[100] px-4 py-3 rounded-xl text-sm font-medium shadow-lg ${
+            toast.ok
+              ? "bg-green-500/20 text-green-400 border border-green-500/30"
+              : "bg-red-500/20 text-red-400 border border-red-500/30"
+          }`}
+        >
+          {toast.msg}
+        </div>
+      )}
+
       <PageHeader
         title={t("products.title")}
         subtitle={t("products.subtitle", { count: String(data.length) })}
@@ -314,6 +350,15 @@ export default function ProductsPage() {
               className="flex items-center gap-2 px-4 py-2.5 bg-card/80 border border-border hover:border-border-hover text-foreground rounded-xl text-sm font-medium transition-colors"
             >
               <FileSpreadsheet className="w-4 h-4" /> {t("products.import")}
+            </button>
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              aria-busy={exporting}
+              className="flex items-center gap-2 px-4 py-2.5 bg-card/80 border border-border hover:border-border-hover text-foreground rounded-xl text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}{" "}
+              {t("common.export")}
             </button>
             <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-light text-foreground rounded-xl text-sm font-medium transition-colors">
               <Plus className="w-4 h-4" /> {t("products.add")}

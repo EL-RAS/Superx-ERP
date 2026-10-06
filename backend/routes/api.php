@@ -143,6 +143,9 @@ Route::prefix('v1')->group(function () {
         Route::post('/products/import', [ProductController::class, 'import'])->middleware('permission:inventory.create');
         Route::post('/products/quick-add', [ProductController::class, 'quickAdd'])->middleware('permission:inventory.create,pos.create');
         Route::get('/products', [ProductController::class, 'index'])->middleware('permission:inventory.view,pos.view');
+        // Export must be registered before /products/{product} or it is swallowed
+        // by the wildcard binding. Inventory view only: POS cashiers get a 403.
+        Route::get('/products/export', [ProductController::class, 'export'])->middleware('permission:inventory.view');
         Route::get('/products/{product}', [ProductController::class, 'show'])->middleware('permission:inventory.view,pos.view');
         Route::post('/products', [ProductController::class, 'store'])->middleware('permission:inventory.create');
         Route::match(['put', 'patch'], '/products/{product}', [ProductController::class, 'update'])->middleware('permission:inventory.edit');

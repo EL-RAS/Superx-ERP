@@ -2151,6 +2151,8 @@ export const enDict: Record<string, string> = {
   "products.import_btn": "Import Products",
   "products.import_done": "Import complete: {created} new, {updated} updated ({rows} rows)",
   "products.import_failed": "Import failed. Please check the file format and try again.",
+  "products.export_success": "Products exported successfully.",
+  "products.export_failed": "Export failed. Please try again.",
 
   // ─── Module: Promotions (Enhanced Types) ────────────
   "promotions.type": "Type",
@@ -4769,6 +4771,8 @@ export const arDict: Record<string, string> = {
   "products.import_btn": "\u0627\u0633\u062A\u064A\u0631\u0627\u062F \u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A",
   "products.import_done": "اكتمل الاستيراد: {created} جديد، {updated} محدّث ({rows} صفوف)",
   "products.import_failed": "\u0641\u0634\u0644 \u0627\u0644\u0627\u0633\u062A\u064A\u0631\u0627\u062F. \u062A\u062D\u0642\u0642 \u0645\u0646 \u0635\u064A\u063A\u0629 \u0627\u0644\u0645\u0644\u0641 \u0648\u062D\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.",
+  "products.export_success": "\u062A\u0645 \u062A\u0635\u062F\u064A\u0631 \u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A \u0628\u0646\u062C\u0627\u062D.",
+  "products.export_failed": "\u0641\u0634\u0644 \u0627\u0644\u062A\u0635\u062F\u064A\u0631. \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.",
 
   // ─── Module: Promotions (Enhanced Types) ────────────
   "promotions.type": "\u0627\u0644\u0646\u0648\u0639",

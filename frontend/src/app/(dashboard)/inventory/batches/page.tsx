@@ -13,6 +13,7 @@ import DataTable from "@/components/ui/DataTable";
 import type { Column } from "@/components/ui/DataTable";
 import SlideOver from "@/components/ui/SlideOver";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 import KPICard from "@/components/ui/KPICard";
 import { AlertTriangle, Layers, Plus, Search } from "lucide-react";
 
@@ -61,7 +62,9 @@ export default function BatchesPage() {
   const showExpiry = config?.modules.includes("expiry_tracking") ?? false;
   const [data, setData] = useState<ProductBatch[]>([]);
   const [total, setTotal] = useState(0);
-  const [products, setProducts] = useState<Product[]>([]);
+  // The product list is fetched server-side on demand (see fetchProductOptions),
+  // so only the current selection is held here.
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [valueAtRisk, setValueAtRisk] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -77,12 +80,9 @@ export default function BatchesPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  const selectedProduct = products.find((p) => String(p.id) === form.product_id);
   const isPiece = selectedProduct?.unit === "pcs";
 
-  const generateBatchNumber = (productId: string): string => {
-    if (!productId) return "";
-    const p = products.find((x) => String(x.id) === productId);
+  const generateBatchNumber = (p: Product | null): string => {
     if (!p?.sku) return "";
     const now = new Date();
     const y = now.getFullYear();
@@ -184,12 +184,18 @@ export default function BatchesPage() {
       .finally(() => setLoading(false));
   }, [token, business, search, page, perPage]);
 
-  const fetchProducts = useCallback(() => {
-    if (!token || !business) return;
-    Products.list(token, business.id)
-      .then((res) => setProducts(res.data))
-      .catch(() => {});
-  }, [token, business]);
+  // Server-side product search. The catalog is paginated (backend default is
+  // 10 rows), so the combobox queries it as the user types rather than loading
+  // a truncated list up front: 20 per search, 50 for the default open list.
+  const fetchProductOptions = useCallback(
+    (query: string): Promise<Product[]> => {
+      if (!token || !business) return Promise.resolve([]);
+      const params: Record<string, string | number> = { per_page: query ? 20 : 50 };
+      if (query) params.search = query;
+      return Products.list(token, business.id, params).then((res) => res.data);
+    },
+    [token, business],
+  );
 
   const fetchSuppliers = useCallback(() => {
     if (!token || !business) return;
@@ -214,16 +220,13 @@ export default function BatchesPage() {
   }, [fetchData]);
 
   useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts]);
-
-  useEffect(() => {
     fetchSuppliers();
   }, [fetchSuppliers]);
 
   const openCreate = () => {
     setEditing(null);
     setForm(emptyForm);
+    setSelectedProduct(null);
     setSlideOpen(true);
   };
 
@@ -241,6 +244,9 @@ export default function BatchesPage() {
         source_type: b.source_type ?? "manual_entry",
         supplier_id: b.supplier_id ? String(b.supplier_id) : "",
       });
+    // index() eager-loads product:id,name,sku,unit, so the selector can label
+    // the current value immediately without waiting for a search.
+    setSelectedProduct(b.product ?? null);
     setSlideOpen(true);
   };
 
@@ -319,24 +325,52 @@ export default function BatchesPage() {
       <SlideOver open={slideOpen} onClose={() => setSlideOpen(false)} title={editing ? t("batches.edit") : t("batches.create")}>
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-muted mb-1.5">{t("common.product")}</label>
-            <select
+            <label
+              htmlFor="batch-product"
+              className="block text-sm font-medium text-muted mb-1.5"
+            >
+              {t("common.product")}
+            </label>
+            {/* key forces a fresh query/list when switching between create and edit */}
+            <SearchableSelect<Product>
+              id="batch-product"
+              key={editing ? `edit-${editing.id}` : "create"}
               value={form.product_id}
-              onChange={(e) => {
-                const pid = e.target.value;
-                setForm((p) => ({
-                  ...p,
+              selectedOption={selectedProduct}
+              fetchOptions={fetchProductOptions}
+              initialOptions={editing?.product ? [editing.product] : undefined}
+              getOptionId={(p) => String(p.id)}
+              renderOption={(p) => {
+                const meta = [
+                  p.sku ? `${t("common.sku")}: ${p.sku}` : null,
+                  p.barcode ? `${t("common.barcode")}: ${p.barcode}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                return (
+                  <span className="flex items-baseline gap-2 min-w-0">
+                    <span className="truncate">{p.name}</span>
+                    {meta && (
+                      <span className="shrink-0 text-[11px] font-mono text-muted">{meta}</span>
+                    )}
+                  </span>
+                );
+              }}
+              onChange={(pid, product) => {
+                setSelectedProduct(product);
+                setForm((prev) => ({
+                  ...prev,
                   product_id: pid,
-                  batch_number: !editing ? generateBatchNumber(pid) || p.batch_number : p.batch_number,
+                  batch_number: !editing
+                    ? generateBatchNumber(product) || prev.batch_number
+                    : prev.batch_number,
                 }));
               }}
-              className="w-full px-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-border-hover transition-colors"
-            >
-              <option value="">{t("batches.select_product")}</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+              placeholder={t("batches.select_product")}
+              searchPlaceholder={t("products.search")}
+              emptyLabel={t("products.empty")}
+              loadingLabel={t("common.loading")}
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-muted mb-1.5">{t("batches.batch_number")}</label>

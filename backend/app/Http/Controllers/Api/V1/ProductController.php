@@ -7,11 +7,14 @@ use App\Models\Business;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductBatch;
+use App\Services\ProductExportService;
 use App\Services\ProductImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
@@ -66,6 +69,40 @@ class ProductController extends Controller
         });
 
         return response()->json($products);
+    }
+
+    /**
+     * Download the tenant's product catalog as .xlsx (default) or .csv.
+     *
+     * Registered ahead of GET /products/{product} so the literal path wins
+     * over the wildcard route.
+     */
+    public function export(Request $request, ProductExportService $exporter): Response
+    {
+        $validated = $request->validate([
+            'format' => ['nullable', Rule::in(['xlsx', 'csv'])],
+        ]);
+
+        $format = $validated['format'] ?? 'xlsx';
+        $rows = $exporter->rows((string) $request->user()->business_id);
+
+        $filename = 'products_export_'.now()->format('Y-m-d').'.'.$format;
+
+        if ($format === 'csv') {
+            $content = $exporter->toCsv($rows);
+            $type = 'text/csv; charset=UTF-8';
+        } else {
+            $content = $exporter->toXlsx($rows);
+            $type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        }
+
+        return response($content, 200, [
+            'Content-Type' => $type,
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'Content-Length' => (string) strlen($content),
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     /**

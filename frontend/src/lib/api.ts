@@ -104,19 +104,26 @@ function authHeaders(token: string, businessId: string): Record<string, string> 
   };
 }
 
+/**
+ * Tear down a dead session on a 401. Shared by the JSON and binary fetches so
+ * an expired token behaves identically whichever one the caller used.
+ */
+function handleUnauthorized(status: number): void {
+  if (status !== 401 || typeof window === "undefined") return;
+  localStorage.removeItem("sx_token");
+  localStorage.removeItem("sx_user");
+  localStorage.removeItem("sx_business");
+  removeAuthCookie();
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.href = "/login";
+  }
+}
+
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401 && typeof window !== "undefined") {
-      localStorage.removeItem("sx_token");
-      localStorage.removeItem("sx_user");
-      localStorage.removeItem("sx_business");
-      removeAuthCookie();
-      if (!window.location.pathname.startsWith("/login")) {
-        window.location.href = "/login";
-      }
-    }
+    handleUnauthorized(res.status);
     throw new ApiError(data?.message || "Request failed", res.status, data?.errors);
   }
   return data;
@@ -903,6 +910,22 @@ export async function importProducts(token: string, bizId: string, file: File): 
     headers: authHeaders(token, bizId),
     body: form,
   });
+}
+
+/**
+ * Download the catalog from GET /products/export as a binary blob.
+ *
+ * Uses a raw fetch because apiFetch() always parses the body as JSON — which
+ * would corrupt the spreadsheet bytes. The caller owns the filename.
+ */
+export async function exportProducts(token: string, bizId: string, format: "xlsx" | "csv" = "xlsx"): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/products/export${qs({ format })}`, { headers: authHeaders(token, bizId) });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    handleUnauthorized(res.status);
+    throw new ApiError(data?.message || "Export failed", res.status, data?.errors);
+  }
+  return res.blob();
 }
 
 export interface QuickAddPayload {
