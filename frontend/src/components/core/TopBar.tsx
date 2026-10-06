@@ -58,31 +58,34 @@ export default function TopBar({ config, title, onMenuClick }: TopBarProps) {
 
   return (
     <>
-      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-xl flex items-center justify-between px-4 md:px-6 sticky top-0 z-30">
-        <div className="flex items-center gap-3 min-w-0">
+      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-xl flex items-center justify-between gap-2 px-3 sm:px-4 md:px-6 sticky top-0 z-30">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             onClick={onMenuClick}
-            className="lg:hidden p-2 rounded-lg text-muted hover:bg-accent-dim hover:text-foreground transition-colors"
+            className="lg:hidden min-h-11 min-w-11 -ms-1.5 flex items-center justify-center rounded-lg text-muted hover:bg-accent-dim hover:text-foreground transition-colors"
             title={t("topbar.menu")}
+            aria-label={t("topbar.menu")}
           >
             <Menu className="w-5 h-5" />
           </button>
-          <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-foreground truncate">{title}</h1>
-            <p className="text-xs text-muted truncate">{businessLabel}</p>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-base sm:text-lg font-semibold text-foreground truncate">{title}</h1>
+            <p className="text-[11px] sm:text-xs text-muted truncate">{businessLabel}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={() => setSearchOpen(true)}
-            className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card border border-border hover:border-primary/30 transition-colors cursor-pointer"
+            className="flex items-center justify-center gap-2 min-h-11 px-2.5 md:px-3 rounded-lg bg-card border border-border hover:border-primary/30 transition-colors cursor-pointer"
+            title={t("topbar.search")}
+            aria-label={t("topbar.search")}
           >
             <svg className="w-4 h-4 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
             </svg>
-            <span className="text-sm text-muted">{t("topbar.search")}</span>
-            <kbd className="text-[10px] text-muted bg-muted/20 border border-border px-1.5 py-0.5 rounded font-mono">
+            <span className="hidden md:inline text-sm text-muted">{t("topbar.search")}</span>
+            <kbd className="hidden md:inline text-[10px] text-muted bg-muted/20 border border-border px-1.5 py-0.5 rounded font-mono">
               {navigator.platform?.includes("Mac") ? "⌘" : "Ctrl+"}K
             </kbd>
           </button>
@@ -93,7 +96,7 @@ export default function TopBar({ config, title, onMenuClick }: TopBarProps) {
 
           <button
             onClick={() => setLocale(locale === "en" ? "ar" : "en")}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-muted hover:bg-accent-dim hover:text-accent transition-colors"
+            className="min-h-11 flex items-center gap-1.5 px-2 sm:px-2.5 rounded-lg text-sm font-medium text-muted hover:bg-accent-dim hover:text-accent transition-colors"
             title={locale === "en" ? "\u0627\u0644\u0639\u0631\u0628\u064A\u0629" : "English"}
           >
             <Globe className="w-4 h-4" />
@@ -103,7 +106,8 @@ export default function TopBar({ config, title, onMenuClick }: TopBarProps) {
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-accent-dim transition-colors"
+              className="min-h-11 flex items-center gap-2 p-1.5 rounded-xl hover:bg-accent-dim transition-colors"
+              aria-label={t("topbar.menu")}
             >
               {user?.avatar ? (
                 // eslint-disable-next-line @next/next/no-img-element

@@ -491,7 +491,7 @@ export default function BatchesPage() {
           <p className="text-sm text-muted">{t("common.loading")}</p>
         ) : previewGrn ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="p-3 bg-card/60 border border-border rounded-xl">
                 <p className="text-xs text-muted mb-1">{t("grn.receipt_num")}</p>
                 <p className="text-sm font-medium">{previewGrn.receipt_number}</p>
@@ -514,8 +514,8 @@ export default function BatchesPage() {
             )}
             <div>
               <p className="text-sm font-medium text-muted mb-2">{t("grn.items")}</p>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="scroll-x">
+                <table className="w-full min-w-[28rem] text-sm">
                   <thead>
                     <tr className="text-muted border-b border-border">
                       <th className="text-start pb-2 font-medium">{t("common.product")}</th>

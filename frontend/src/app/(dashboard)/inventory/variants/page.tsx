@@ -303,8 +303,8 @@ export default function VariantsPage() {
                     <p className="text-xs text-muted mt-0.5">{t("variants.count", { count: String(variants.length) })}</p>
                   </div>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                <div className="scroll-x">
+                  <table className="w-full min-w-[26rem] text-sm">
                     <thead>
                       <tr className="border-b border-border/30">
                         <th className="px-4 py-3 text-start text-xs font-medium text-muted uppercase tracking-wider">{t("variants.sku")}</th>

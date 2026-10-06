@@ -22,8 +22,8 @@ type Section = { accounts: { code: string; name: string; debit: number; credit: 
 function ReportTable({ headers, rows }: { headers: string[]; rows: (string | number)[][] }) {
   return (
     <div className="glass rounded-xl overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="scroll-x">
+        <table className="w-full text-sm min-w-[32rem]">
           <thead>
             <tr className="border-b border-border bg-card/60">
               {headers.map((h, i) => (
@@ -358,7 +358,7 @@ export default function ReportsPage() {
 
           {tab === "pnl" && pnl && (
             <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="glass rounded-xl p-5">
                   <div className="flex items-center gap-2 mb-2"><TrendingUp className="w-4 h-4 text-emerald-400" /><span className="text-xs text-muted">{t("reports.total_revenue")}</span></div>
                   <p className="text-2xl font-bold text-emerald-400">{formatCurrency(pnl.revenue.total, locale)}</p>
@@ -373,7 +373,7 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="glass rounded-xl p-5">
                   <h4 className="text-sm font-medium text-muted mb-4">{t("reports.revenue")}</h4>
                   <div className="space-y-2">
@@ -402,7 +402,7 @@ export default function ReportsPage() {
 
           {tab === "balance_sheet" && bs && (
             <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="glass rounded-xl p-5">
                   <p className="text-xs text-muted mb-1">{t("reports.total_assets")}</p>
                   <p className="text-2xl font-bold text-foreground">{formatCurrency(bs.asset.total, locale)}</p>
@@ -417,7 +417,7 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {[
                   { title: t("reports.assets"), accounts: bs.asset.accounts, total: bs.asset.total },
                   { title: t("reports.liabilities"), accounts: bs.liability.accounts, total: bs.liability.total },
@@ -441,7 +441,7 @@ export default function ReportsPage() {
 
           {tab === "cash_flow" && cf && (
             <div className="space-y-6">
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
                   { label: t("reports.operating"), value: cf.operating, color: "emerald" },
                   { label: t("reports.investing"), value: cf.investing, color: "blue" },
@@ -479,7 +479,7 @@ export default function ReportsPage() {
 
           {tab === "trial_balance" && tb && (
             <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="glass rounded-xl p-5">
                   <p className="text-xs text-muted mb-1">{t("journal_entries.total_debit")}</p>
                   <p className="text-2xl font-bold text-foreground">{formatCurrency(tb.total_debit, locale)}</p>
@@ -518,7 +518,7 @@ export default function ReportsPage() {
 
           {tab === "sales_summary" && ss && (
             <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="glass rounded-xl p-5">
                   <div className="flex items-center gap-2 mb-2"><Receipt className="w-4 h-4 text-primary-light" /><span className="text-xs text-muted">{t("reports.invoice_count")}</span></div>
                   <p className="text-2xl font-bold">{ss.summary.invoice_count}</p>
@@ -546,7 +546,7 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-muted">{t("reports.by_product")}</h4>
                   <ReportTable
@@ -581,7 +581,7 @@ export default function ReportsPage() {
 
           {tab === "stock_valuation" && sv && (
             <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="glass rounded-xl p-5">
                   <div className="flex items-center gap-2 mb-2"><Package className="w-4 h-4 text-primary-light" /><span className="text-xs text-muted">{t("reports.product_count")}</span></div>
                   <p className="text-2xl font-bold">{sv.summary.product_count}</p>
@@ -616,7 +616,7 @@ export default function ReportsPage() {
 
           {tab === "supplier_aging" && sa && (
             <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="glass rounded-xl p-5">
                   <div className="flex items-center gap-2 mb-2"><HandCoins className="w-4 h-4 text-red-400" /><span className="text-xs text-muted">{t("reports.total_outstanding")}</span></div>
                   <p className="text-2xl font-bold text-red-400">{formatCurrency(sa.total_outstanding, locale)}</p>

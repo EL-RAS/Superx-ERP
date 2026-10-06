@@ -262,7 +262,7 @@ function SectorPreview({ sector }: { sector: SectorInfo }) {
         </div>
 
         <div className="rounded-xl overflow-hidden border border-border">
-          <div className="overflow-x-auto">
+          <div className="scroll-x">
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-card-hover">

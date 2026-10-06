@@ -201,8 +201,8 @@ export default function DashboardContent() {
 
 				<div className="glass rounded-2xl p-5 border border-border">
 					<h3 className="text-lg font-semibold text-foreground mb-4">{t("dashboard.recent_invoices")}</h3>
-					<div className="overflow-x-auto">
-						<table className="w-full text-sm">
+					<div className="scroll-x">
+						<table className="w-full min-w-[32rem] text-sm">
 							<thead>
 								<tr className="text-muted text-start border-b border-border">
 									<th className="py-2 text-start font-medium">{t("dashboard.invoice_number")}</th>

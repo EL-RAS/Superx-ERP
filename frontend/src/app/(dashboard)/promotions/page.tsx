@@ -486,7 +486,7 @@ export default function PromotionsPage() {
             {err("name")}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-muted mb-1.5">{t("promotions.type")}</label>
               <select
@@ -513,7 +513,7 @@ export default function PromotionsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-muted mb-1.5">{t("promotions.start_date")}</label>
               <input
@@ -551,7 +551,7 @@ export default function PromotionsPage() {
           )}
 
           {form.type === "bogo" && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-muted mb-1.5">{t("promotions.buy_quantity")}</label>
                 <input
@@ -683,7 +683,7 @@ export default function PromotionsPage() {
             </button>
             {advancedOpen && (
               <div className="px-4 pb-4 pt-1 border-t border-border/50 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-muted mb-1.5">{t("promotions.min_amount")}</label>
                     <input
@@ -721,7 +721,7 @@ export default function PromotionsPage() {
                 )}
 
                 {isHappyHour && (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-medium text-muted mb-1.5">{t("promotions.happy_hour_start")}</label>
                       <input

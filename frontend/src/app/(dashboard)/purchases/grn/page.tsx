@@ -26,6 +26,9 @@ type GRNItem = {
   storage_location: string;
   purchase_unit?: string | null;
   purchase_unit_qty?: number | null;
+  /** Set on direct lines that came from an unlinked catalog row — the backend
+   *  provisions the product and back-links this row when the receipt saves. */
+  supplier_product_id?: number | null;
 };
 
 export default function GRNPage() {
@@ -126,6 +129,7 @@ export default function GRNPage() {
         storage_location: "",
         purchase_unit: null,
         purchase_unit_qty: null,
+        supplier_product_id: null,
       })));
       setPaymentMethod("");
     } catch { setSelectedPO(null); setItems([]); }
@@ -151,6 +155,30 @@ export default function GRNPage() {
       storage_location: "",
       purchase_unit: p.purchase_unit ?? null,
       purchase_unit_qty: p.purchase_unit_qty ?? 1,
+      supplier_product_id: null,
+    }]);
+    setProductSearch("");
+    setProductOpen(false);
+  };
+
+  // An unlinked catalog row has no product yet: carry its id through so the
+  // receipt can provision the product and back-link the row in one transaction.
+  const addUnlinkedItem = (row: SupplierProduct) => {
+    if (items.some((i) => i.supplier_product_id === row.id)) {
+      showToast(t("grn.duplicate_item"), "error");
+      return;
+    }
+    setItems((prev) => [...prev, {
+      purchase_order_item_id: "",
+      product_id: "",
+      supplier_product_id: row.id,
+      name: row.name,
+      quantity: "",
+      unit_cost: row.catalog_cost != null && row.catalog_cost > 0 ? String(row.catalog_cost) : "",
+      expiry_date: "",
+      storage_location: "",
+      purchase_unit: null,
+      purchase_unit_qty: null,
     }]);
     setProductSearch("");
     setProductOpen(false);
@@ -180,6 +208,17 @@ export default function GRNPage() {
     const q = productSearch.trim().toLowerCase();
     return !q || p.name.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q) || (p.barcode ?? "").toLowerCase().includes(q);
   });
+  // Rows this supplier offers but that have never been received as a real
+  // product — they are picked the same way, then created on save.
+  const unlinkedRows = supplierId
+    ? supplierCatalog.filter((c) => {
+        if (c.product_id != null) return false;
+        const q = productSearch.trim().toLowerCase();
+        return !q || c.name.toLowerCase().includes(q);
+      })
+    : [];
+  const dropdownEmpty = filteredProducts.length === 0 && unlinkedRows.length === 0;
+  const hasNewItems = items.some((i) => !i.product_id && i.supplier_product_id);
 
   const receiptTotal = round2(items.reduce((sum, i) => {
     const qty = parseFloat(i.quantity) * (mode === "direct" ? (i.purchase_unit_qty ?? 1) : 1);
@@ -221,6 +260,8 @@ export default function GRNPage() {
         items: validItems.map((i) => ({
           ...(mode === "po" ? { purchase_order_item_id: parseInt(i.purchase_order_item_id) || null } : {}),
           product_id: parseInt(i.product_id) || null,
+          ...(i.name.trim() ? { name: i.name.trim() } : {}),
+          ...(mode === "direct" && i.supplier_product_id ? { supplier_product_id: i.supplier_product_id } : {}),
           received_quantity: parseFloat(i.quantity),
           ...(i.unit_cost !== "" ? { unit_cost: parseFloat(i.unit_cost) } : {}),
           ...(i.expiry_date ? { expiry_date: i.expiry_date } : {}),
@@ -323,16 +364,30 @@ export default function GRNPage() {
                   />
                   {productOpen && supplierId && (
                     <div className="product-options absolute z-50 mt-1 w-full max-h-52 overflow-y-auto bg-card rounded-xl border border-border shadow-xl">
-                      {filteredProducts.length === 0
+                      {dropdownEmpty
                         ? <p className="px-4 py-3 text-sm text-muted">{supplierCatalog.length === 0 ? t("grn.no_catalog") : t("grn.no_products")}</p>
-                        : filteredProducts.map((p) => (
-                            <button key={p.id} onMouseDown={(e) => e.preventDefault()} onClick={() => addDirectItem(p)}
-                              className="w-full text-start px-4 py-2.5 hover:bg-border/40 text-sm text-foreground transition-colors">
-                              <span className="font-medium">{p.name}</span>
-                              <span className="ms-2 text-xs text-muted">{p.sku}</span>
-                              {p.purchase_unit && <span className="ms-2 text-xs text-muted">({p.purchase_unit}{p.purchase_unit_qty && p.purchase_unit_qty > 1 ? ` = ${p.purchase_unit_qty} ${p.unit}` : ""})</span>}
-                            </button>
-                          ))}
+                        : (
+                          <>
+                            {filteredProducts.map((p) => (
+                              <button key={p.id} onMouseDown={(e) => e.preventDefault()} onClick={() => addDirectItem(p)}
+                                className="w-full text-start px-4 py-2.5 hover:bg-border/40 text-sm text-foreground transition-colors">
+                                <span className="font-medium">{p.name}</span>
+                                <span className="ms-2 text-xs text-muted">{p.sku}</span>
+                                {p.purchase_unit && <span className="ms-2 text-xs text-muted">({p.purchase_unit}{p.purchase_unit_qty && p.purchase_unit_qty > 1 ? ` = ${p.purchase_unit_qty} ${p.unit}` : ""})</span>}
+                              </button>
+                            ))}
+                            {unlinkedRows.map((row) => (
+                              <button key={`cat-${row.id}`} onMouseDown={(e) => e.preventDefault()} onClick={() => addUnlinkedItem(row)}
+                                className="w-full text-start px-4 py-2.5 hover:bg-border/40 text-sm text-foreground transition-colors">
+                                <span className="font-medium">{row.name}</span>
+                                <span className="ms-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400">{t("grn.new_product_badge")}</span>
+                                {row.catalog_cost != null && (
+                                  <span className="ms-2 text-xs text-muted">{formatCurrency(Number(row.catalog_cost), locale)}</span>
+                                )}
+                              </button>
+                            ))}
+                          </>
+                        )}
                     </div>
                   )}
                 </div>
@@ -361,6 +416,9 @@ export default function GRNPage() {
                 <div key={idx} className="glass rounded-xl p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm text-foreground">{item.name}</span>
+                    {!item.product_id && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400">{t("grn.new_product_badge")}</span>
+                    )}
                     <button onClick={() => removeItem(idx)} className="text-muted hover:text-red-400 transition-colors" aria-label={t("common.remove")}>
                       <X className="w-4 h-4" />
                     </button>
@@ -397,6 +455,12 @@ export default function GRNPage() {
                 </div>
               ))}
             </div>
+          )}
+
+          {mode === "direct" && hasNewItems && (
+            <p className="flex items-start gap-1.5 text-xs text-amber-500">
+              {t("grn.auto_create_hint")}
+            </p>
           )}
 
           <div>

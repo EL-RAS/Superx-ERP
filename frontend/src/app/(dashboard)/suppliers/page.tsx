@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { useAuthStore } from "@/stores/auth-store";
 import { Suppliers, Products, ApiError, fetchSupplierCatalog, addSupplierCatalogItem, removeSupplierCatalogItem, fetchSupplierLedger } from "@/lib/api";
-import type { Supplier, SupplierProduct, Product, SupplierLedger } from "@/lib/types";
+import type { Supplier, SupplierProduct, SupplierLedger } from "@/lib/types";
 import { formatCurrency } from "@/lib/types";
 import { normalizePhone, isValidEmail, isValidPhone } from "@/lib/phone";
 import { mapFieldErrors } from "@/lib/validation";
@@ -14,7 +14,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
 import type { Column } from "@/components/ui/DataTable";
 import SlideOver from "@/components/ui/SlideOver";
-import { Truck, Plus, Search, AlertCircle, Trash2, Loader2, ChevronDown, PackageOpen, Pencil, BookOpen } from "lucide-react";
+import SearchableSelect from "@/components/ui/SearchableSelect";
+import { Truck, Plus, Search, AlertCircle, Trash2, Loader2, PackageOpen, Pencil, BookOpen } from "lucide-react";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 const emptyForm = { name: "", email: "", phone: "", tax_number: "", address: "", contact_name: "", payment_terms: "" };
@@ -26,6 +27,15 @@ const LEDGER_KIND_LABELS: Record<string, string> = {
   purchase_return: "suppliers.ledger_kind_return",
   supplier_claim: "suppliers.ledger_kind_claim",
 };
+
+/**
+ * One entry in the catalog combobox: either a product already in the store
+ * catalog (picked and linked) or a free-text name the merchant just typed
+ * (stored as an unlinked catalog row until goods arrive for it).
+ */
+type CatalogOption =
+  | { kind: "product"; id: number; name: string; sku: string | null; cost: number }
+  | { kind: "custom"; id: 0; name: string };
 
 export default function SuppliersPage() {
   const { token, business } = useAuthStore();
@@ -51,12 +61,7 @@ export default function SuppliersPage() {
   const [activeTab, setActiveTab] = useState<"supply" | "imported" | "ledger">("supply");
   const [ledger, setLedger] = useState<SupplierLedger | null>(null);
   const [ledgerLoading, setLedgerLoading] = useState(false);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [productsLoading, setProductsLoading] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
-  const [addSearch, setAddSearch] = useState("");
-  const [addName, setAddName] = useState("");
-  const [addProductId, setAddProductId] = useState<number | null>(null);
+  const [addSelected, setAddSelected] = useState<CatalogOption | null>(null);
   const [addCost, setAddCost] = useState("");
   const [adding, setAdding] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<SupplierProduct | null>(null);
@@ -146,14 +151,36 @@ export default function SuppliersPage() {
       .finally(() => setCatalogLoading(false));
   }, [token, business]);
 
-  const loadProducts = useCallback(() => {
-    if (!token || !business) return;
-    setProductsLoading(true);
-    Products.list(token, business.id, { per_page: 200 })
-      .then((res) => setProducts(res.data))
-      .catch(() => setProducts([]))
-      .finally(() => setProductsLoading(false));
-  }, [token, business]);
+  const searchCatalogProducts = useCallback(
+    async (query: string): Promise<CatalogOption[]> => {
+      if (!token || !business) return [];
+      try {
+        const res = await Products.list(token, business.id, query ? { search: query, per_page: 20 } : { per_page: 20 });
+        return res.data.map((p) => ({
+          kind: "product" as const,
+          id: p.id,
+          name: p.name,
+          sku: p.sku,
+          cost: Number(p.cost ?? 0),
+        }));
+      } catch {
+        return [];
+      }
+    },
+    [token, business]
+  );
+
+  const selectCatalogOption = (_id: string, option: CatalogOption) => {
+    setAddSelected(option);
+    setAddCost(option.kind === "product" && option.cost > 0 ? String(option.cost) : "");
+  };
+
+  const createCatalogItem = (query: string) => {
+    const name = query.trim();
+    if (!name) return;
+    setAddSelected({ kind: "custom", id: 0, name });
+    setAddCost("");
+  };
 
   const loadLedger = useCallback((supplierId: number) => {
     if (!token || !business) return;
@@ -174,19 +201,15 @@ export default function SuppliersPage() {
     setProfileSupplier(s);
     setActiveTab("supply");
     setLedger(null);
-    setAddOpen(false);
-    setAddSearch("");
-    setAddName("");
-    setAddProductId(null);
+    setAddSelected(null);
     setAddCost("");
     setProfileOpen(true);
     loadCatalog(s.id);
-    loadProducts();
   };
 
   const addItemToCatalog = async () => {
     if (!token || !business || !profileSupplier) return;
-    const name = addName.trim();
+    const name = addName;
     if (!name) return;
     setAdding(true);
     try {
@@ -196,14 +219,12 @@ export default function SuppliersPage() {
         catalog_cost: addCost.trim() ? Number(addCost) : null,
       });
       showToast(t("suppliers.item_added"), "success");
-      setAddName("");
-      setAddProductId(null);
-      setAddSearch("");
+      setAddSelected(null);
       setAddCost("");
-      setAddOpen(false);
       loadCatalog(profileSupplier.id);
-    } catch {
-      showToast(t("common.error"), "error");
+    } catch (err) {
+      const apiErr = err instanceof ApiError ? err : null;
+      showToast(apiErr?.message || t("common.error"), "error");
     } finally {
       setAdding(false);
     }
@@ -275,9 +296,10 @@ export default function SuppliersPage() {
 
   const importedItems = catalog.filter((c) => c.product_id != null);
   const tabItems = activeTab === "supply" ? catalog : importedItems;
-  const filteredProducts = products.filter((p) =>
-    !addSearch.trim() || p.name.toLowerCase().includes(addSearch.toLowerCase()) || (p.sku ?? "").toLowerCase().includes(addSearch.toLowerCase())
-  );
+  // Derived from the single combobox selection so the payload and the button's
+  // disabled state can never drift apart from what is on screen.
+  const addName = addSelected ? addSelected.name.trim() : "";
+  const addProductId = addSelected && addSelected.kind === "product" ? addSelected.id : null;
 
   const tabClass = (active: boolean) =>
     `flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${active ? "bg-primary/15 text-primary-light" : "text-muted hover:text-foreground"}`;
@@ -510,61 +532,36 @@ export default function SuppliersPage() {
 
             <div className="glass rounded-xl p-4 space-y-3">
               <h4 className="text-sm font-medium text-muted">{t("suppliers.add_item")}</h4>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => { setAddOpen((o) => !o); setAddSearch(""); }}
-                  className="w-full px-3 py-2 bg-card/80 border border-border rounded-lg text-sm text-start text-foreground focus:outline-none focus:border-border-hover flex items-center justify-between gap-1 transition-colors"
-                >
-                  <span className={`truncate ${addProductId ? "text-foreground" : "text-muted"}`}>
-                    {addProductId ? products.find((p) => p.id === addProductId)?.name ?? addName : t("suppliers.link_product")}
-                  </span>
-                  <ChevronDown className="w-4 h-4 text-muted shrink-0" />
-                </button>
-                {addOpen && (
-                  <div className="absolute z-30 mt-1 w-full glass rounded-xl border border-border shadow-xl overflow-hidden">
-                    <input
-                      autoFocus
-                      value={addSearch}
-                      onChange={(e) => setAddSearch(e.target.value)}
-                      placeholder={t("suppliers.link_product")}
-                      className="w-full px-3 py-2 bg-card/80 border-b border-border text-sm text-foreground placeholder:text-muted focus:outline-none"
-                    />
-                    <div className="max-h-44 overflow-y-auto">
-                      {productsLoading ? (
-                        <p className="px-3 py-3 text-xs text-muted">{t("purchase_orders.loading")}</p>
-                      ) : filteredProducts.length === 0 ? (
-                        <p className="px-3 py-3 text-xs text-muted">{t("suppliers.no_products")}</p>
-                      ) : (
-                        filteredProducts.map((p) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              setAddProductId(p.id);
-                              setAddName(p.name);
-                              setAddOpen(false);
-                            }}
-                            className="w-full px-3 py-2 text-start text-sm text-foreground hover:bg-card-hover transition-colors flex items-center justify-between gap-2"
-                          >
-                            <span className="truncate">{p.name}</span>
-                            {p.sku ? <span className="text-xs text-muted shrink-0">{p.sku}</span> : null}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
+              <SearchableSelect<CatalogOption>
+                value={addProductId != null ? String(addProductId) : ""}
+                selectedOption={addSelected}
+                onChange={selectCatalogOption}
+                fetchOptions={searchCatalogProducts}
+                getOptionId={(o) => String(o.id)}
+                renderOption={(o) => (
+                  <>
+                    <span className="truncate">{o.name}</span>
+                    {o.kind === "custom" ? (
+                      <span className="ms-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400">
+                        {t("suppliers.custom_badge")}
+                      </span>
+                    ) : o.sku ? (
+                      <span className="ms-2 text-xs text-muted">{o.sku}</span>
+                    ) : null}
+                  </>
                 )}
-              </div>
-              <input
-                type="text"
-                value={addName}
-                onChange={(e) => {
-                  setAddName(e.target.value);
-                  if (addProductId) setAddProductId(null);
-                }}
-                placeholder={t("suppliers.item_name")}
-                className="w-full px-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover transition-colors"
+                placeholder={t("suppliers.combo_placeholder")}
+                searchPlaceholder={t("suppliers.combo_search")}
+                emptyLabel={t("suppliers.no_matches")}
+                loadingLabel={t("purchase_orders.loading")}
+                createLabel={(q) => (
+                  <>
+                    <Plus className="w-3.5 h-3.5 inline-block me-1 -mt-0.5" />
+                    {t("suppliers.create_item")}{" "}
+                    <span className="text-muted">&ldquo;{q}&rdquo;</span>
+                  </>
+                )}
+                onCreate={createCatalogItem}
               />
               <input
                 type="number"
@@ -577,7 +574,7 @@ export default function SuppliersPage() {
               />
               <button
                 onClick={addItemToCatalog}
-                disabled={adding || !addName.trim()}
+                disabled={adding || !addName}
                 className="w-full py-2.5 bg-primary hover:bg-primary-light text-foreground rounded-xl text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}

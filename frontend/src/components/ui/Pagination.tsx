@@ -45,20 +45,20 @@ export default function Pagination({
   const NextIcon = dir === "rtl" ? ChevronLeft : ChevronRight;
 
   const btn =
-    "inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+    "inline-flex h-11 sm:h-8 min-w-11 sm:min-w-8 items-center justify-center rounded-lg px-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
   const idle = `${btn} text-muted hover:bg-card-hover/60 hover:text-foreground`;
   const active = `${btn} bg-primary text-primary-foreground`;
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border/50 px-4 py-3">
-      <div className="flex items-center gap-3 text-xs text-muted">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border/50 px-3 sm:px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
         {onPerPageChange && (
           <label className="flex items-center gap-2">
             <span>{t("common.per_page")}</span>
             <select
               value={perPage}
               onChange={(e) => onPerPageChange(Number(e.target.value))}
-              className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
+              className="h-8 max-sm:min-h-0 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
             >
               {pageSizeOptions.map((n) => (
                 <option key={n} value={n}>
@@ -71,7 +71,7 @@ export default function Pagination({
         <span>{t("common.pagination_info", { from: String(from), to: String(to), total: String(total) })}</span>
       </div>
 
-      <nav aria-label="pagination" className="flex items-center gap-1">
+      <nav aria-label="pagination" className="flex flex-wrap items-center gap-1">
         <button
           type="button"
           className={idle}

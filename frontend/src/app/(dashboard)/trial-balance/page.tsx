@@ -77,7 +77,7 @@ export default function TrialBalancePage() {
 
       {data && (
         <>
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             <div className="glass rounded-xl p-4">
               <p className="text-xs text-muted mb-1">{t("journal_entries.total_debit")}</p>
               <p className="text-xl font-bold text-foreground">{formatCurrency(data.total_debit, locale)}</p>

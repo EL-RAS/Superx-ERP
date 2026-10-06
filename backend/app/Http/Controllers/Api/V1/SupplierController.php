@@ -226,8 +226,15 @@ class SupplierController extends Controller
         }
 
         $validated = $request->validate([
-            'product_id' => ['nullable', Rule::exists('products', 'id')->where('business_id', $request->user()->business_id)],
-            'name' => 'nullable|string|max:255',
+            'product_id' => [
+                'nullable',
+                Rule::exists('products', 'id')->where(
+                    fn ($q) => $q->where('business_id', $request->user()->business_id)->whereNull('deleted_at')
+                ),
+            ],
+            // Either link an existing product (its name is used automatically)
+            // or type a free-text catalog item — never neither.
+            'name' => 'required_without:product_id|string|max:255',
             'catalog_cost' => 'nullable|numeric|min:0',
         ]);
 

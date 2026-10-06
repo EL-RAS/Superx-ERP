@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Models\Business;
 use App\Models\Product;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
@@ -13,6 +12,7 @@ use App\Rules\ProductQuantity;
 use App\Services\AccountingService;
 use App\Services\DocumentNumberService;
 use App\Services\NotificationService;
+use App\Services\ProductProvisioner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -115,32 +115,14 @@ class PurchaseOrderController extends Controller
 
     protected function importProduct(Request $request, array $item): Product
     {
-        $business = Business::with('businessType')->find($request->user()->business_id);
-        $typeSlug = $business?->businessType?->slug ?? 'gen';
-        $typeCode = strtoupper(substr(preg_replace('/[^a-z0-9]/i', '', $typeSlug), 0, 4));
-
-        $count = Product::where('business_id', $request->user()->business_id)->count();
-
-        $cost = round((float) $item['unit_cost'], 2);
-
-        return Product::create([
+        return ProductProvisioner::create([
             'business_id' => $request->user()->business_id,
-            'created_by' => $request->user()->id,
+            'user_id' => $request->user()->id,
             'name' => $item['name'],
-            'sku' => sprintf('%s-GEN-%04d', $typeCode, $count + 1),
-            'unit' => 'pcs',
-            'price' => round($cost * 3, 2),
-            'cost' => $cost,
-            'tax_rate' => 16,
-            'has_expiry' => true,
+            'unit_cost' => $item['unit_cost'],
+            'supplier_id' => $request->input('supplier_id'),
+            'source' => 'po_import',
             'has_batch' => true,
-            'min_stock' => 0,
-            'stock_quantity' => 0,
-            'is_active' => true,
-            'metadata' => [
-                'source' => 'po_import',
-                'supplier_id' => $request->input('supplier_id'),
-            ],
         ]);
     }
 

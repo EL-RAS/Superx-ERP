@@ -453,7 +453,7 @@ export default function ProductsPage() {
           </div>
 
           {/* Cost & Price */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-muted mb-1.5">{t("products.cost_jod")}</label>
               <input type="number" step="0.01" min="0" value={form.cost} onChange={(e) => setForm((p) => ({ ...p, cost: e.target.value }))} className="w-full px-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover transition-colors" />
@@ -465,7 +465,7 @@ export default function ProductsPage() {
           </div>
 
           {/* Sale Price & Toggle */}
-          <div className="grid grid-cols-2 gap-3 items-end">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
             <div>
               <label className="block text-sm font-medium text-muted mb-1.5">{t("products.sale_price")}</label>
               <input
@@ -504,7 +504,7 @@ export default function ProductsPage() {
           </div>
 
           {/* Stock Quantity (read-only, auto-calculated from batches) & Min Stock */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-muted mb-1.5">{t("common.stock")}</label>
               <input type="number" value={form.stock_quantity || "0"} readOnly

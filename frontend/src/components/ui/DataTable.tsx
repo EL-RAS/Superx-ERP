@@ -37,7 +37,7 @@ function SkeletonRow({ cols }: { cols: number }) {
   return (
     <tr className="border-b border-border/50">
       {Array.from({ length: cols }).map((_, i) => (
-        <td key={i} className="px-4 py-3">
+        <td key={i} className="px-3 py-3 sm:px-4">
           <div className="h-4 skeleton rounded w-3/4" />
         </td>
       ))}
@@ -51,15 +51,18 @@ export default function DataTable({ columns, data, loading, emptyMessage, emptyI
   const page = pagination?.page ?? 1;
   const perPage = pagination?.perPage ?? 10;
   const showPagination = !!pagination && total > 0;
+  // Wide tables must scroll sideways on a phone instead of crushing every
+  // column into an unreadable sliver; narrow tables still fit naturally.
+  const tableCls = `w-full${columns.length > 5 ? " min-w-[36rem]" : ""}`;
   if (loading) {
     return (
       <div className="glass rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div className="scroll-x">
+          <table className={tableCls}>
             <thead>
               <tr className="border-b border-border">
                 {columns.map((col) => (
-                  <th key={col.key} className="px-4 py-3 text-start text-xs font-medium text-muted uppercase tracking-wider">
+                  <th key={col.key} className="px-3 py-3 sm:px-4 text-start text-xs font-medium text-muted uppercase tracking-wider">
                     {col.label}
                   </th>
                 ))}
@@ -86,12 +89,12 @@ export default function DataTable({ columns, data, loading, emptyMessage, emptyI
 
   return (
     <div className="glass rounded-2xl overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full">
+      <div className="scroll-x">
+        <table className={tableCls}>
           <thead>
             <tr className="border-b border-border">
               {columns.map((col) => (
-                <th key={col.key} className="px-4 py-3 text-start text-xs font-medium text-muted uppercase tracking-wider">
+                <th key={col.key} className="px-3 py-3 sm:px-4 text-start text-xs font-medium text-muted uppercase tracking-wider">
                   {col.label}
                 </th>
               ))}
@@ -105,7 +108,7 @@ export default function DataTable({ columns, data, loading, emptyMessage, emptyI
                 className={`border-b border-border/30 transition-colors hover:bg-card-hover/30 ${onRowClick ? "cursor-pointer" : ""} ${idx % 2 === 1 ? "bg-card/20" : ""} ${rowClassName?.(row) ?? ""}`}
               >
                 {columns.map((col) => (
-                  <td key={col.key} className={`px-4 py-3 text-sm text-foreground ${col.className || ""}`}>
+                  <td key={col.key} className={`px-3 py-3 sm:px-4 text-sm text-foreground ${col.className || ""}`}>
                     {col.render
                       ? col.render(row[col.key], row)
                       : formatCellValue(row[col.key], col.type || "text", locale)}

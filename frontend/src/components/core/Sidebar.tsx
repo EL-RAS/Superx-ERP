@@ -275,14 +275,16 @@ export default function Sidebar({ config, open, onClose }: SidebarProps) {
         <div
           className="fixed inset-0 bg-black/50 z-40 lg:hidden"
           onClick={onClose}
+          aria-hidden="true"
         />
       )}
       <aside
-        className={`w-64 h-screen bg-card border-e border-border flex flex-col fixed inset-y-0 start-0 z-50 transition-transform duration-300 ease-in-out ${
+        aria-label={t("topbar.menu")}
+        className={`w-64 h-screen bg-card border-e border-border flex flex-col fixed inset-y-0 start-0 z-50 will-change-transform transition-transform duration-300 ease-in-out ${
           open ? "translate-x-0" : hiddenTransform
-        } lg:translate-x-0`}
+        } ${open ? "" : "max-lg:pointer-events-none"} lg:translate-x-0`}
       >
-        <div className="h-16 flex items-center gap-2.5 px-4 border-b border-border">
+        <div className="h-16 shrink-0 flex items-center gap-2.5 px-4 border-b border-border">
           <StoreLogoUploader size={40} interactive={false} />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-foreground leading-tight truncate">
@@ -294,14 +296,15 @@ export default function Sidebar({ config, open, onClose }: SidebarProps) {
           </div>
           <button
             onClick={onClose}
-            className="lg:hidden p-1.5 rounded-lg text-muted hover:bg-accent-dim hover:text-foreground transition-colors"
+            className="lg:hidden min-h-11 min-w-11 -me-2 flex items-center justify-center rounded-lg text-muted hover:bg-accent-dim hover:text-foreground transition-colors"
             title={t("common.close")}
+            aria-label={t("common.close")}
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-3 px-3">
+        <nav className="flex-1 overflow-y-auto overscroll-contain py-3 px-3">
           {config.navigation.map((node) => {
             const hasChildren = node.children && node.children.length > 0;
             const isExpanded = expanded === node.label;
@@ -316,7 +319,7 @@ export default function Sidebar({ config, open, onClose }: SidebarProps) {
                   <>
                     <button
                       onClick={() => toggleSection(node.label)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                      className={`w-full min-h-11 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                         isActive
                           ? "bg-accent-dim text-gold"
                           : "text-muted hover:bg-accent-dim hover:text-foreground"
@@ -353,7 +356,7 @@ export default function Sidebar({ config, open, onClose }: SidebarProps) {
                             key={child.route}
                             href={child.route}
                             onClick={onClose}
-                            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                            className={`flex min-h-10 items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
                               pathname === child.route
                                 ? "bg-accent-dim text-gold font-medium"
                                 : "text-muted hover:text-foreground hover:bg-accent-dim"
@@ -370,10 +373,10 @@ export default function Sidebar({ config, open, onClose }: SidebarProps) {
                   <Link
                     href={node.route}
                     onClick={onClose}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                    className={`flex min-h-11 items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                       pathname === node.route
                         ? "bg-accent-dim text-gold font-medium"
-                        : "text-muted hover:bg-accent-dim hover:text-foreground"
+                        : "text-muted hover:text-foreground hover:bg-accent-dim"
                     }`}
                   >
                     <Icon name={node.icon} />
@@ -390,7 +393,7 @@ export default function Sidebar({ config, open, onClose }: SidebarProps) {
           })}
         </nav>
 
-        <div className="p-3 border-t border-border">
+        <div className="shrink-0 p-3 border-t border-border">
           <Link
             href="/profile"
             onClick={onClose}

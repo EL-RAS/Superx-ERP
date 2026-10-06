@@ -269,7 +269,7 @@ export default function CustomersDirectoryPage() {
               </div>
               {detailCustomer.loyalty_card_number && <div className="flex items-center gap-2 text-sm"><span className="text-muted">{t("crm.card_number")}:</span><span className="font-mono text-foreground">{detailCustomer.loyalty_card_number}</span></div>}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="glass rounded-xl p-3"><p className="text-xs text-muted">{t("crm.loyalty_points")}</p><p className="text-lg font-semibold text-foreground">{detailCustomer.loyalty_card?.points_balance ?? detailCustomer.loyalty_points_balance ?? 0}</p></div>
               <div className="glass rounded-xl p-3"><p className="text-xs text-muted">{t("crm.total_spend")}</p><p className="text-lg font-semibold text-foreground">{formatCurrency(Number(detailCustomer.total_spend) || 0, locale)}</p></div>
               <div className="glass rounded-xl p-3"><p className="text-xs text-muted">{t("crm.total_visits")}</p><p className="text-lg font-semibold text-foreground">{detailCustomer.total_visits}</p></div>

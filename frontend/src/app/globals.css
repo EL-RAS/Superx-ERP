@@ -106,6 +106,42 @@ body {
   font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* `clip` (never `hidden`) so `position: sticky` headers keep working: `clip`
+     does not create a scrolling box, it only stops a stray fixed / transform
+     element from widening the page body. */
+  overflow-x: clip;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Horizontal scroll containers for data tables: momentum scrolling on iOS and
+   no pull-to-refresh / parent scroll chaining while a table is dragged. */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* Touch targets: 44px minimum on coarse pointers (phones / tablets). */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    min-height: 44px;
+  }
+}
+
+/* iOS Safari zooms the whole viewport when a focused control renders below
+   16px — force readable control text on small screens instead. */
+@media (max-width: 768px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 .glass {

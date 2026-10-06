@@ -131,8 +131,8 @@ export default function RolesPage() {
       />
 
       <div className="glass rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div className="scroll-x">
+          <table className="w-full min-w-[36rem]">
             <thead>
               <tr className="border-b border-border">
                 <th className="px-4 py-3 text-start text-xs font-medium text-muted uppercase tracking-wider min-w-[160px]">{t("roles.role")}</th>

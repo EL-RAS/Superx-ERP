@@ -11,14 +11,19 @@ use App\Models\ProductBatch;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
 use App\Models\PurchaseOrderPayment;
+use App\Models\SupplierProduct;
 use App\Rules\ProductQuantity;
+use App\Scopes\BusinessScope;
 use App\Services\AccountingService;
 use App\Services\DocumentNumberService;
+use App\Services\ProductProvisioner;
 use App\Services\SupplierLedgerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class GoodsReceiptController extends Controller
 {
@@ -59,7 +64,23 @@ class GoodsReceiptController extends Controller
             'reference_invoice_number' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
+            // Nullable so a direct receipt can name an item that does not exist
+            // in the catalog yet; PO lines always carry a product (checked below).
+            'items.*.product_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('products', 'id')->where(
+                    fn ($q) => $q->where('business_id', $request->user()->business_id)->whereNull('deleted_at')
+                ),
+            ],
+            'items.*.name' => 'nullable|string|max:255',
+            'items.*.supplier_product_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('supplier_products', 'id')->where(
+                    fn ($q) => $q->where('business_id', $request->user()->business_id)
+                ),
+            ],
             'items.*.purchase_order_item_id' => 'nullable|exists:purchase_order_items,id',
             'items.*.received_quantity' => ['required', 'numeric', 'min:0.01', ProductQuantity::forItems(fn (string $attribute) => $request->input(str_replace('.received_quantity', '.product_id', $attribute)))],
             'items.*.unit_cost' => 'nullable|numeric|min:0',
@@ -93,6 +114,35 @@ class GoodsReceiptController extends Controller
                 $supplierId = $po->supplier_id;
             }
 
+            // Every line needs a resolvable product before the receipt is
+            // created: PO lines must reference an existing product (the order
+            // already owns it), direct lines may instead name a brand-new item
+            // — but then the merchant has to give it a name and a cost, since
+            // this is what the provisioned catalog record will be valued at.
+            foreach ($validated['items'] as $index => $item) {
+                if (! $isDirect && empty($item['product_id'])) {
+                    throw ValidationException::withMessages([
+                        "items.{$index}.product_id" => 'A product is required when receiving against a purchase order.',
+                    ]);
+                }
+
+                if (! $isDirect || ! empty($item['product_id'])) {
+                    continue;
+                }
+
+                $errors = [];
+                if (blank($item['name'] ?? null)) {
+                    $errors["items.{$index}.name"] = 'A product or an item name is required.';
+                }
+                if (blank($item['unit_cost'] ?? null)) {
+                    $errors["items.{$index}.unit_cost"] = 'A unit cost is required for a new item so it can be valued.';
+                }
+
+                if ($errors !== []) {
+                    throw ValidationException::withMessages($errors);
+                }
+            }
+
             $receipt = GoodsReceipt::create([
                 'business_id' => $businessId,
                 'user_id' => $request->user()->id,
@@ -117,9 +167,14 @@ class GoodsReceiptController extends Controller
             $createdBatchIds = [];
 
             foreach ($validated['items'] as $item) {
-                $product = Product::find($item['product_id']);
+                $product = empty($item['product_id']) ? null : Product::find($item['product_id']);
+
                 if (! $product) {
-                    continue;
+                    if ($isDirect) {
+                        $product = $this->provisionProduct($request, $businessId, $supplierId, $item);
+                    } else {
+                        continue;
+                    }
                 }
 
                 if ($isDirect) {
@@ -318,6 +373,67 @@ class GoodsReceiptController extends Controller
         $goodsReceipt->load(['purchaseOrder:id,order_number', 'supplier:id,name', 'user:id,name', 'items']);
 
         return response()->json($goodsReceipt);
+    }
+
+    /**
+     * A direct receipt line may name an item the merchant has not registered
+     * yet (a free-text row on the supplier's catalog). Create the catalog
+     * record here, inside the receipt's transaction, so the rest of the flow —
+     * batch, WAC, movements, GL — treats it exactly like an existing product.
+     * Afterwards the product flows through the ordinary receiving path, which
+     * is what grants it its real opening stock.
+     */
+    private function provisionProduct(Request $request, string $businessId, ?string $supplierId, array $item): Product
+    {
+        $quantity = (float) $item['received_quantity'];
+
+        $product = ProductProvisioner::create([
+            'business_id' => $businessId,
+            'user_id' => $request->user()->id,
+            'name' => $item['name'],
+            'unit_cost' => $item['unit_cost'],
+            'supplier_id' => $supplierId,
+            'source' => 'grn_import',
+            // Batch-managed only when the merchant supplied an expiry date: the
+            // UI hides that input unless expiry tracking is enabled for the
+            // tenant, and a batch product without one is rejected downstream.
+            'has_batch' => ! empty($item['expiry_date']),
+            // A fractional first receipt means the item is sold by weight, not
+            // by piece — see ProductProvisioner for why that has to be decided
+            // now rather than on the next receipt.
+            'is_weighable' => abs($quantity - round($quantity)) > 1e-6,
+        ]);
+
+        $this->linkCatalogItem($businessId, $supplierId, $item, $product);
+
+        return $product;
+    }
+
+    /**
+     * Point the supplier's catalog row at the freshly created product so this
+     * item shows up as a normal, linked catalog entry from then on instead of
+     * offering to create a duplicate.
+     */
+    private function linkCatalogItem(string $businessId, ?string $supplierId, array $item, Product $product): void
+    {
+        if ($supplierId === null) {
+            return;
+        }
+
+        $scope = fn () => SupplierProduct::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $businessId)
+            ->where('supplier_id', $supplierId);
+
+        $pivot = ! empty($item['supplier_product_id'])
+            ? $scope()->find($item['supplier_product_id'])
+            : null;
+
+        $pivot ??= $scope()->where('name', $item['name'])->first();
+
+        $pivot?->update([
+            'product_id' => $product->id,
+            'is_imported' => true,
+        ]);
     }
 
     /**

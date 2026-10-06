@@ -274,7 +274,7 @@ export default function CategoryManagementModal({ open, onClose, onChanged, toke
         {editing && (
           <div className="px-4 py-3 border-b border-border bg-card/60 space-y-3"
             style={{ paddingInlineStart: 12 + depth * 22 }}>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-muted mb-1">{t("products.category_name")}</label>
                 <input
@@ -297,7 +297,7 @@ export default function CategoryManagementModal({ open, onClose, onChanged, toke
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
               <div>
                 <label className="block text-xs font-medium text-muted mb-1">{t("products.category_parent")}</label>
                 <select value={editParentId} onChange={(e) => setEditParentId(e.target.value)}
@@ -376,7 +376,7 @@ export default function CategoryManagementModal({ open, onClose, onChanged, toke
             <div className="p-5 space-y-4 overflow-y-auto">
               {/* Create category form */}
               <div className="rounded-xl border border-border bg-card/40 p-4 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-muted mb-1">{t("products.category_name")}</label>
                     <input
@@ -401,7 +401,7 @@ export default function CategoryManagementModal({ open, onClose, onChanged, toke
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3 items-end">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
                   <div>
                     <label className="block text-xs font-medium text-muted mb-1">{t("products.category_parent")}</label>
                     <select value={createParentId} onChange={(e) => setCreateParentId(e.target.value)}

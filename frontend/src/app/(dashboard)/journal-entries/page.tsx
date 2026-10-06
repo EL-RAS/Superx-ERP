@@ -229,7 +229,8 @@ export default function JournalEntriesPage() {
               <h4 className="text-sm font-medium text-muted mb-3">{t("journal_entries.lines")}</h4>
               {selected.lines && selected.lines.length > 0 ? (
                 <div className="glass rounded-xl overflow-hidden">
-                  <table className="w-full">
+                  <div className="scroll-x">
+                    <table className="w-full min-w-[30rem]">
                     <thead>
                       <tr className="border-b border-border">
                         <th className="px-4 py-3 text-start text-xs font-medium text-muted uppercase">{t("journal_entries.account")}</th>
@@ -248,7 +249,8 @@ export default function JournalEntriesPage() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                    </table>
+                  </div>
                 </div>
               ) : (
                 <p className="text-sm text-muted">{detailLoading ? t("journal_entries.loading") : t("journal_entries.no_lines")}</p>
@@ -286,7 +288,7 @@ export default function JournalEntriesPage() {
 
       <SlideOver open={formOpen} onClose={() => setFormOpen(false)} title={t("journal_entries.new_entry")} width="max-w-3xl">
         <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-sm text-muted mb-1 block">{t("common.date")}</label>
               <input type="date" value={form.date} onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
@@ -308,25 +310,25 @@ export default function JournalEntriesPage() {
             <div className="space-y-3">
               {lines.map((line, idx) => (
                 <div key={idx} className="glass rounded-xl p-3">
-                  <div className="grid grid-cols-12 gap-2">
-                    <div className="col-span-4">
+                  <div className="grid grid-cols-2 md:grid-cols-12 gap-2">
+                    <div className="col-span-2 md:col-span-4">
                       <select value={line.account_id} onChange={(e) => updateLine(idx, "account_id", e.target.value)}
                         className="w-full px-3 py-2 bg-card/80 border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-border-hover">
                         <option value="">{t("journal_entries.select_account")}</option>
                         {accounts.map((a) => <option key={a.id} value={a.id}>[{a.code}] {a.name}</option>)}
                       </select>
                     </div>
-                    <div className="col-span-2">
+                    <div className="col-span-1 md:col-span-2">
                       <input type="number" min="0" step="0.01" placeholder={t("journal_entries.debit")} value={line.debit}
                         onChange={(e) => updateLine(idx, "debit", e.target.value)}
                         className="w-full px-3 py-2 bg-card/80 border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover" />
                     </div>
-                    <div className="col-span-2">
+                    <div className="col-span-1 md:col-span-2">
                       <input type="number" min="0" step="0.01" placeholder={t("journal_entries.credit")} value={line.credit}
                         onChange={(e) => updateLine(idx, "credit", e.target.value)}
                         className="w-full px-3 py-2 bg-card/80 border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover" />
                     </div>
-                    <div className="col-span-3">
+                    <div className="col-span-2 md:col-span-3">
                       <input placeholder={t("common.description")} value={line.description}
                         onChange={(e) => updateLine(idx, "description", e.target.value)}
                         className="w-full px-3 py-2 bg-card/80 border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover" />

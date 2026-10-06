@@ -346,8 +346,8 @@ export default function AccountsPage() {
 
       {loading ? (
         <div className="glass rounded-2xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="scroll-x">
+            <table className="w-full min-w-[36rem]">
               <thead>
                 <tr className="border-b border-border">
                   {["code", "name", "type", "balance", "active"].map((k) => (
@@ -377,8 +377,8 @@ export default function AccountsPage() {
         </div>
       ) : (
         <div className="glass rounded-2xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="scroll-x">
+            <table className="w-full min-w-[36rem]">
               <thead>
                 <tr className="border-b border-border">
                   <th className="px-4 py-3 text-start text-xs font-medium text-muted uppercase tracking-wider">{t("common.code")}</th>

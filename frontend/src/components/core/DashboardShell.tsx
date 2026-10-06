@@ -46,6 +46,17 @@ export default function DashboardShell({
     return () => window.cancelAnimationFrame(raf);
   }, [pathname]);
 
+  // The mobile drawer is fixed-position: freeze the page behind it so the
+  // background cannot scroll while it is open.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [sidebarOpen]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Sidebar
@@ -59,7 +70,9 @@ export default function DashboardShell({
           title={title}
           onMenuClick={() => setSidebarOpen(true)}
         />
-        <main className="p-4 md:p-6">{children}</main>
+        <main className="p-4 sm:p-5 md:p-6 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6">
+          {children}
+        </main>
       </div>
     </div>
   );

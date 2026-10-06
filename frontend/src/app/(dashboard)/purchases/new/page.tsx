@@ -138,7 +138,7 @@ function NewPurchaseOrder() {
       <PageHeader title={t("purchase_orders.new_title")} subtitle={t("purchase_orders.new_subtitle")} />
 
       <div className="glass rounded-2xl p-6 space-y-5">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-sm text-muted mb-1 block">{t("common.supplier")}</label>
             <select value={form.supplier_id} onChange={(e) => setForm((p) => ({ ...p, supplier_id: e.target.value }))}
@@ -170,8 +170,8 @@ function NewPurchaseOrder() {
           <div className="space-y-3">
             {form.items.map((item, idx) => (
               <div key={idx} className="glass rounded-xl p-3">
-                <div className="grid grid-cols-12 gap-2">
-                  <div className="col-span-5">
+                <div className="grid grid-cols-2 md:grid-cols-12 gap-2">
+                  <div className="col-span-2 md:col-span-5">
                     <select
                       value={item.product_id}
                       onChange={(e) => {
@@ -189,11 +189,11 @@ function NewPurchaseOrder() {
                       ))}
                     </select>
                   </div>
-                  <div className="col-span-2">
+                  <div className="col-span-1 md:col-span-2">
                     <input placeholder={t("invoices.qty")} type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateFormItem(idx, "quantity", e.target.value)}
                       className="w-full px-3 py-2 bg-card/80 border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover" />
                   </div>
-                  <div className="col-span-3">
+                  <div className="col-span-2 md:col-span-3">
                     <input placeholder={t("purchase_orders.unit_cost")} type="number" min="0" step="0.001" value={item.unit_cost} onChange={(e) => updateFormItem(idx, "unit_cost", e.target.value)}
                       className="w-full px-3 py-2 bg-card/80 border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover" />
                   </div>

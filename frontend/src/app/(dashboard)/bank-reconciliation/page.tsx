@@ -249,7 +249,8 @@ export default function BankReconciliationPage() {
               <div>
                 <h4 className="text-sm font-medium text-muted mb-3">{t("bank_recon.lines")}</h4>
                 <div className="glass rounded-xl overflow-hidden">
-                  <table className="w-full">
+                  <div className="scroll-x">
+                    <table className="w-full min-w-[34rem]">
                     <thead>
                       <tr className="border-b border-border">
                         <th className="px-4 py-3 text-start text-xs font-medium text-muted uppercase">{t("common.date")}</th>
@@ -277,7 +278,7 @@ export default function BankReconciliationPage() {
                           <td className="px-4 py-3 text-center">
                             {selected.status === "draft" && (
                               <button onClick={() => handleToggleLine(selected.id, line)}
-                                className={`p-1 rounded transition-colors ${line.reconciled ? "text-amber-400 hover:bg-amber-500/10" : "text-emerald-400 hover:bg-emerald-500/10"}`}>
+                                className={`min-h-11 min-w-11 inline-flex items-center justify-center rounded transition-colors ${line.reconciled ? "text-amber-400 hover:bg-amber-500/10" : "text-emerald-400 hover:bg-emerald-500/10"}`}>
                                 {line.reconciled ? <X className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
                               </button>
                             )}
@@ -286,6 +287,7 @@ export default function BankReconciliationPage() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               </div>
             )}

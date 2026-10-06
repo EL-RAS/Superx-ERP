@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -25,6 +25,13 @@ interface SearchableSelectProps<T> {
   /** Pairs with a <label htmlFor>. */
   id?: string;
   className?: string;
+  /**
+   * Renders a trailing row that turns the current query into a new value —
+   * shown whenever the search box is non-empty, even when nothing matched.
+   * Only active alongside `onCreate`.
+   */
+  createLabel?: (query: string) => ReactNode;
+  onCreate?: (query: string) => void;
 }
 
 /**
@@ -49,6 +56,8 @@ export default function SearchableSelect<T>({
   disabled = false,
   id,
   className = "",
+  createLabel,
+  onCreate,
 }: SearchableSelectProps<T>) {
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -66,6 +75,12 @@ export default function SearchableSelect<T>({
   // the default list has had a chance to arrive.
   const [loaded, setLoaded] = useState(false);
   const [active, setActive] = useState(-1);
+
+  // The "create" row lives in the same keyboard space as the options, after
+  // them, and only while the merchant has actually typed something.
+  const createQuery = query.trim();
+  const showCreate = Boolean(createLabel && onCreate && createQuery);
+  const rowCount = options.length + (showCreate ? 1 : 0);
 
   // Fetch the default list on open, then re-query as the user types.
   useEffect(() => {
@@ -145,15 +160,26 @@ export default function SearchableSelect<T>({
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive((i) => (i + 1 >= options.length ? 0 : i + 1));
+      if (rowCount === 0) return;
+      setActive((i) => (i + 1 >= rowCount ? 0 : i + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActive((i) => (i <= 0 ? options.length - 1 : i - 1));
+      if (rowCount === 0) return;
+      setActive((i) => (i <= 0 ? rowCount - 1 : i - 1));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const option = options[active];
-      if (option) choose(option);
+      if (active >= 0 && active < options.length) {
+        choose(options[active]);
+      } else if (showCreate && (active === options.length || (active === -1 && options.length === 0))) {
+        create();
+      }
     }
+  }
+
+  function create() {
+    if (!showCreate || !onCreate) return;
+    onCreate(createQuery);
+    close();
   }
 
   return (
@@ -165,7 +191,7 @@ export default function SearchableSelect<T>({
         onClick={toggleOpen}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-start focus:outline-none focus:border-border-hover transition-colors disabled:opacity-50 ${
+        className={`w-full flex min-h-11 items-center justify-between gap-2 px-3 sm:px-4 py-3 bg-card/80 border border-border rounded-xl text-sm text-start focus:outline-none focus:border-border-hover transition-colors disabled:opacity-50 ${
           selectedOption ? "text-foreground" : "text-muted"
         }`}
       >
@@ -183,7 +209,7 @@ export default function SearchableSelect<T>({
 
       {open && (
         <div className="absolute z-50 mt-1.5 w-full rounded-xl bg-card border border-border shadow-2xl shadow-black/20 overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
             <Search className="w-4 h-4 shrink-0 text-muted" />
             <input
               ref={inputRef}
@@ -197,31 +223,51 @@ export default function SearchableSelect<T>({
             />
           </div>
 
-          <div role="listbox" className="max-h-60 overflow-y-auto py-1">
+          <div role="listbox" className="max-h-[min(15rem,50vh)] overflow-y-auto overscroll-contain py-1">
             {!loaded || (loading && options.length === 0) ? (
               <p className="px-4 py-3 text-sm text-muted text-center">{loadingLabel}</p>
-            ) : options.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-muted text-center">{emptyLabel}</p>
             ) : (
-              options.map((option, index) => {
-                const optionId = getOptionId(option);
-                const isSelected = optionId === value;
-                return (
+              <>
+                {options.length === 0 && !showCreate ? (
+                  <p className="px-4 py-3 text-sm text-muted text-center">{emptyLabel}</p>
+                ) : (
+                  options.map((option, index) => {
+                    const optionId = getOptionId(option);
+                    const isSelected = optionId === value;
+                    return (
+                      <button
+                        type="button"
+                        key={optionId}
+                        role="option"
+                        aria-selected={isSelected}
+                        onMouseEnter={() => setActive(index)}
+                        onClick={() => choose(option)}
+                        className={`w-full text-start px-3 sm:px-4 py-3 text-sm transition-colors ${
+                          index === active ? "bg-accent-dim" : "hover:bg-accent-dim"
+                        } ${isSelected ? "text-primary" : "text-foreground"}`}
+                      >
+                        {renderOption(option)}
+                      </button>
+                    );
+                  })
+                )}
+
+                {showCreate && (
                   <button
                     type="button"
-                    key={optionId}
+                    key="__create__"
                     role="option"
-                    aria-selected={isSelected}
-                    onMouseEnter={() => setActive(index)}
-                    onClick={() => choose(option)}
-                    className={`w-full text-start px-4 py-2.5 text-sm transition-colors ${
-                      index === active ? "bg-accent-dim" : "hover:bg-accent-dim"
-                    } ${isSelected ? "text-primary" : "text-foreground"}`}
+                    aria-selected={false}
+                    onMouseEnter={() => setActive(options.length)}
+                    onClick={create}
+                    className={`w-full text-start px-3 sm:px-4 py-3 text-sm border-t border-border mt-1 transition-colors text-primary ${
+                      options.length === active ? "bg-accent-dim" : "hover:bg-accent-dim"
+                    }`}
                   >
-                    {renderOption(option)}
+                    {createLabel?.(createQuery)}
                   </button>
-                );
-              })
+                )}
+              </>
             )}
           </div>
         </div>

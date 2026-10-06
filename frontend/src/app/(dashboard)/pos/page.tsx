@@ -665,14 +665,14 @@ export default function POSPage() {
   }, [receipt, autoPrintReceipt]);
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-8rem)]">
+    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-8rem)] min-h-0">
       <Toasts toasts={toasts} />
 
       {/* ── Left: Products ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Header row: barcode + search + shift indicator */}
-        <div className="flex gap-3 mb-3 items-center">
-          <div className="relative w-56">
+        <div className="flex flex-wrap gap-3 mb-3 items-center">
+          <div className="relative w-full sm:w-56">
             <ScanBarcode className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
             <input
               ref={barcodeRef}
@@ -685,7 +685,7 @@ export default function POSPage() {
               className="w-full ps-10 pe-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-primary/50 transition-colors"
             />
           </div>
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-[10rem]">
             <Search className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
             <input
               type="text"
@@ -857,7 +857,7 @@ export default function POSPage() {
       </div>
 
       {/* ── Right: Cart ── */}
-      <div className="w-96 flex flex-col glass rounded-2xl">
+      <div className="w-full lg:w-96 max-h-[45vh] lg:max-h-none flex flex-col glass rounded-2xl min-h-0">
         {/* Cart header */}
         <div className="px-5 py-4 border-b border-border">
           <div className="flex items-center justify-between">

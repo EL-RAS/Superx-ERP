@@ -599,7 +599,7 @@ export default function AdjustmentsPage() {
       <SlideOver open={detailOpen} onClose={() => setDetailOpen(false)} title={t("inventory_adjustments.details")}>
         {detail ? (
           <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="p-3 bg-card/60 border border-border rounded-xl">
                 <p className="text-xs text-muted mb-1">{t("inventory_adjustments.transaction")}</p>
                 <p className="text-sm font-medium">{detail.adjustment_number}</p>
@@ -684,9 +684,9 @@ export default function AdjustmentsPage() {
                 <p className="text-sm text-muted">{t("inventory_adjustments.journal_none")}</p>
               ) : (
                 (detail.journal_entries ?? []).map((entry) => (
-                  <div key={entry.id} className="mt-2 first:mt-0">
+                  <div key={entry.id} className="mt-2 first:mt-0 scroll-x">
                     <p className="text-xs font-medium text-muted mb-1">{entry.entry_number} · {entry.description}</p>
-                    <table className="w-full text-sm">
+                    <table className="w-full min-w-[22rem] text-sm">
                       <thead>
                         <tr className="text-muted border-b border-border">
                           <th className="text-start pb-1.5 font-medium">{t("inventory_adjustments.debit")} / {t("inventory_adjustments.credit")}</th>
@@ -710,7 +710,7 @@ export default function AdjustmentsPage() {
         <div className="mt-6">
           <button
             onClick={() => setDeleteConfirmOpen(true)}
-            className="w-full py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl text-sm font-medium transition-colors"
+            className="w-full min-h-11 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl text-sm font-medium transition-colors"
           >
             <span className="inline-flex items-center justify-center gap-2">
               <Trash2 className="w-4 h-4" />

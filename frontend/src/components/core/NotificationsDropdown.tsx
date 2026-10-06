@@ -162,7 +162,7 @@ export default function NotificationsDropdown() {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={toggleOpen}
-        className="relative p-2 rounded-lg text-muted hover:bg-accent-dim hover:text-accent transition-colors"
+        className="relative min-h-11 min-w-11 flex items-center justify-center rounded-lg text-muted hover:bg-accent-dim hover:text-accent transition-colors"
         title={t("topbar.notifications")}
       >
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -178,7 +178,7 @@ export default function NotificationsDropdown() {
       <AnimatePresence>
         {open && (
           <motion.div
-            className="absolute end-0 top-full mt-2 w-[380px] rounded-xl bg-card border border-border shadow-2xl shadow-black/20 z-50 overflow-hidden"
+            className="absolute end-0 top-full mt-2 w-[calc(100vw-1.5rem)] max-w-[380px] rounded-xl bg-card border border-border shadow-2xl shadow-black/20 z-50 overflow-hidden"
             initial={{ opacity: 0, y: -8, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.96 }}

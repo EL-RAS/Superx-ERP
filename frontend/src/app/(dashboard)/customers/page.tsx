@@ -268,7 +268,7 @@ export default function CustomersPage() {
           {business?.business_type.slug === "clothing_apparel" && (
             <div className="pt-2 border-t border-border space-y-4">
               <div className="text-xs font-semibold uppercase tracking-wide text-muted">{t("customers.size_preferences")}</div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {([
                   { label: t("customers.size_top"), key: "size_top" },
                   { label: t("customers.size_bottom"), key: "size_bottom" },
@@ -343,7 +343,7 @@ export default function CustomersPage() {
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[30rem] text-sm">
                 <thead>
                   <tr className="bg-card/60 text-muted text-xs uppercase tracking-wide">
                     <th className="text-start px-4 py-2.5 font-medium">{t("customers.statement.date")}</th>

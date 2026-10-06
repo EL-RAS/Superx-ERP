@@ -138,7 +138,7 @@ export default function AccountsPayablePage() {
         }
       />
 
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         <div className="glass rounded-xl p-5">
           <div className="flex items-center gap-2 mb-2"><Wallet className="w-4 h-4 text-red-400" /><span className="text-xs text-muted">{t("accounting.ap.total_outstanding")}</span></div>
           <p className="text-2xl font-bold text-red-400">{formatCurrency(data?.total_outstanding ?? 0, locale)}</p>
@@ -158,8 +158,8 @@ export default function AccountsPayablePage() {
         <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-muted" /></div>
       ) : data && data.suppliers.length > 0 ? (
         <div className="glass rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="scroll-x">
+            <table className="w-full min-w-[34rem] text-sm">
               <thead>
                 <tr className="border-b border-border bg-card/60">
                   <th className="px-4 py-3 text-start text-xs font-medium text-muted">{t("accounting.ap.supplier")}</th>
@@ -222,7 +222,7 @@ export default function AccountsPayablePage() {
                     : "bg-blue-500/20 text-blue-400 border-blue-500/30"
                   }`}>{ord.status.replace(/_/g, " ")}</span>
                 </div>
-                <div className="grid grid-cols-3 gap-3 text-sm mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-3">
                   <div><p className="text-xs text-muted">{t("accounting.ap.total")}</p><p className="text-foreground">{formatCurrency(ord.total, locale)}</p></div>
                   <div><p className="text-xs text-muted">{t("accounting.ap.paid")}</p><p className="text-foreground">{formatCurrency(ord.paid, locale)}</p></div>
                   <div><p className="text-xs text-muted">{t("accounting.ap.balance")}</p><p className="text-red-400 font-semibold">{formatCurrency(ord.balance, locale)}</p></div>
@@ -253,7 +253,7 @@ export default function AccountsPayablePage() {
                       </div>
                       <span className="text-xs font-medium px-2 py-1 rounded-full border bg-blue-500/20 text-blue-400 border-blue-500/30">{t("accounting.ap.gr")}</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-3 text-sm mb-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-3">
                       <div><p className="text-xs text-muted">{t("accounting.ap.total")}</p><p className="text-foreground">{formatCurrency(rc.total, locale)}</p></div>
                       <div><p className="text-xs text-muted">{t("accounting.ap.paid")}</p><p className="text-foreground">{formatCurrency(rc.paid, locale)}</p></div>
                       <div><p className="text-xs text-muted">{t("accounting.ap.balance")}</p><p className="text-red-400 font-semibold">{formatCurrency(rc.balance, locale)}</p></div>

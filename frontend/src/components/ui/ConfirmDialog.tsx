@@ -39,12 +39,12 @@ export default function ConfirmDialog({ open, onClose, onConfirm, title, message
             onClick={onClose}
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
           />
-          <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-3 sm:p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="glass rounded-2xl p-6 w-full max-w-md"
+              className="glass rounded-2xl p-5 sm:p-6 w-full max-w-md"
             >
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2 rounded-xl bg-red-500/10">
@@ -56,18 +56,18 @@ export default function ConfirmDialog({ open, onClose, onConfirm, title, message
               {error && (
                 <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2 mb-6">{error}</p>
               )}
-              <div className="flex justify-end gap-3">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
                 <button
                   onClick={onClose}
                   disabled={loading}
-                  className="px-4 py-2 rounded-xl text-sm font-medium text-muted hover:text-foreground hover:bg-card-hover transition-colors"
+                  className="min-h-11 px-4 py-2.5 sm:py-2 rounded-xl text-sm font-medium text-muted hover:text-foreground hover:bg-card-hover transition-colors"
                 >
                   {t("common.cancel")}
                 </button>
                 <button
                   onClick={onConfirm}
                   disabled={loading}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${btnClass} disabled:opacity-50`}
+                  className={`min-h-11 px-4 py-2.5 sm:py-2 rounded-xl text-sm font-medium transition-colors ${btnClass} disabled:opacity-50`}
                 >
                   {loading ? t("common.processing") : (confirmLabel ?? t("common.confirm"))}
                 </button>

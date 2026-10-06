@@ -485,7 +485,7 @@ export default function InvoicesPage() {
       {/* Create/Edit SlideOver */}
       <SlideOver open={formOpen} onClose={() => setFormOpen(false)} title={editingInvoice ? t("invoices.edit") : t("invoices.new")} width="max-w-2xl">
         <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-sm text-muted mb-1 block">{t("invoices.customer")}</label>
               <select value={form.customer_id} onChange={(e) => setForm((p) => ({ ...p, customer_id: e.target.value }))}

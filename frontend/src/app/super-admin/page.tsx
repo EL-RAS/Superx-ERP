@@ -348,7 +348,7 @@ export default function SuperAdminPage() {
           </div>
         ) : (
           <div className="glass rounded-2xl border border-border overflow-hidden overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[46rem] text-sm">
               <thead>
                 <tr className="text-start text-[11px] uppercase tracking-wider text-muted border-b border-border">
                   <th className="text-start font-medium px-5 py-3.5">{t("superadmin.col_tenant")}</th>
@@ -438,7 +438,7 @@ export default function SuperAdminPage() {
           <>
             <PageHeader title={t("superadmin.tab_leads")} subtitle={t("superadmin.leads_subtitle")} />
 
-            <div className="grid grid-cols-3 gap-3 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
               {[
                 { label: t("superadmin.summary_total"), value: leads?.summary.total ?? 0, icon: Inbox, cls: "text-sky-400 bg-sky-500/10" },
                 { label: t("superadmin.lead_status_new"), value: leads?.summary.new ?? 0, icon: ShieldCheck, cls: "text-amber-400 bg-amber-500/10" },
@@ -468,7 +468,7 @@ export default function SuperAdminPage() {
               </div>
             ) : (
               <div className="glass rounded-2xl border border-border overflow-hidden overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[46rem] text-sm">
                   <thead>
                     <tr className="text-start text-[11px] uppercase tracking-wider text-muted border-b border-border">
                       <th className="text-start font-medium px-5 py-3.5">{t("superadmin.col_contact")}</th>
@@ -716,7 +716,7 @@ function CreateTenantDrawer({
           {errors.name && <p className="text-[11px] text-danger mt-1">{errors.name}</p>}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>{t("superadmin.business_type")}</label>
             <select
@@ -743,12 +743,12 @@ function CreateTenantDrawer({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <DrawerField label={t("leads.phone")} value={form.contact_phone} onChange={(v) => set("contact_phone", v)} error={errors.contact_phone} />
           <DrawerField label={t("leads.city")} value={form.city} onChange={(v) => set("city", v)} error={errors.city} />
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <DrawerField label={t("superadmin.starts_at")} type="date" value={form.subscription_starts_at} onChange={(v) => set("subscription_starts_at", v)} error={errors.subscription_starts_at} />
           <DrawerField label={t("superadmin.expires_at")} type="date" value={form.expires_at} onChange={(v) => set("expires_at", v)} error={errors.expires_at} />
           <DrawerField label={t("superadmin.max_seats")} type="number" value={form.max_pos_registers} onChange={(v) => set("max_pos_registers", v)} error={errors.max_pos_registers} />
@@ -756,14 +756,14 @@ function CreateTenantDrawer({
 
         <div className="pt-2 border-t border-border/60">
           <p className="text-[11px] font-semibold text-gold tracking-wide mb-3">{t("superadmin.admin_section")}</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <DrawerField label={t("superadmin.admin_name")} value={form.admin_name} onChange={(v) => set("admin_name", v)} error={errors.admin_name} />
             <DrawerField label={t("superadmin.admin_username")} value={form.admin_username} onChange={(v) => set("admin_username", v)} error={errors.admin_username} placeholder="letters_digits_only" />
           </div>
-          <div className="grid grid-cols-2 gap-3 mt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <DrawerField label={t("superadmin.admin_email")} type="email" value={form.admin_email} onChange={(v) => set("admin_email", v)} error={errors.admin_email} />
           </div>
-          <div className="grid grid-cols-2 gap-3 mt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <DrawerField label={t("superadmin.admin_password")} type="password" value={form.admin_password} onChange={(v) => set("admin_password", v)} error={errors.admin_password} />
             <DrawerField label={t("superadmin.confirm_password")} type="password" value={form.admin_password_confirmation} onChange={(v) => set("admin_password_confirmation", v)} error={errors.admin_password_confirmation} />
           </div>
@@ -894,7 +894,7 @@ function ManageTenantDrawer({
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>{t("superadmin.status_label")}</label>
             <select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -918,7 +918,7 @@ function ManageTenantDrawer({
           {errors.name && <p className="text-[11px] text-danger mt-1">{errors.name}</p>}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <DrawerField
             label={t("leads.phone")}
             value={form.contact_phone ?? ""}
@@ -929,7 +929,7 @@ function ManageTenantDrawer({
           <DrawerField label={t("leads.city")} value={form.city ?? ""} onChange={(v) => set("city", v)} error={errors.city} />
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <DrawerField label={t("superadmin.starts_at")} type="date" value={form.subscription_starts_at ?? ""} onChange={(v) => set("subscription_starts_at", v)} error={errors.subscription_starts_at} />
           <DrawerField label={t("superadmin.expires_at")} type="date" value={form.expires_at ?? ""} onChange={(v) => set("expires_at", v)} error={errors.expires_at} />
           <DrawerField label={t("superadmin.max_seats")} type="number" value={form.max_pos_registers ?? ""} onChange={(v) => set("max_pos_registers", v)} error={errors.max_pos_registers} />
@@ -937,7 +937,7 @@ function ManageTenantDrawer({
 
         <div className="pt-2 border-t border-border/60">
           <p className="text-[11px] font-semibold text-gold tracking-wide mb-3">{t("superadmin.reset_admin")}</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <DrawerField label={t("superadmin.new_password")} type="password" value={form.admin_password ?? ""} onChange={(v) => set("admin_password", v)} error={errors.admin_password} hint={t("superadmin.leave_blank_hint")} />
             <DrawerField label={t("superadmin.confirm_password")} type="password" value={form.admin_password_confirmation ?? ""} onChange={(v) => set("admin_password_confirmation", v)} error={errors.admin_password_confirmation} />
           </div>
@@ -1088,7 +1088,7 @@ function ApproveLeadModal({
                 />
                 {errors.email && <p className="text-[11px] text-danger mt-1">{errors.email}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>{t("superadmin.approve_days")}</label>
                   <input
