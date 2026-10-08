@@ -183,8 +183,11 @@ class ProductBatchController extends Controller
                 );
             }
 
-            app(InventorySyncService::class)
-                ->queueReconcile($businessId, $request->user()->id);
+            // Real-time reconciliation: force the 1030 inventory asset balance
+            // onto the freshly-calculated on-hand stock value inside the same
+            // transaction, so a manual batch add can never leave the ledger
+            // silently out of sync.
+            app(InventorySyncService::class)->sync($businessId, $request->user()->id);
 
             return response()->json($batch, 201);
         });
@@ -419,12 +422,28 @@ class ProductBatchController extends Controller
             }
         }
 
-        $productBatch->update($validated);
+        $oldOnHandValue = $this->batchOnHandValue($productBatch);
 
-        $productBatch->load('product');
-        $this->refreshProductMetrics($productBatch->product);
+        return DB::transaction(function () use ($request, $validated, $productBatch, $businessId, $oldOnHandValue) {
+            $productBatch->update($validated);
 
-        return response()->json($productBatch);
+            $productBatch->load('product');
+            $this->refreshProductMetrics($productBatch->product);
+
+            $delta = round($this->batchOnHandValue($productBatch) - $oldOnHandValue, 2);
+
+            if (abs($delta) > 0.005) {
+                $this->postManualBatchAdjustment($businessId, $productBatch, $delta, $request->user()->id);
+            }
+
+            // Real-time reconciliation: force the 1030 inventory asset balance
+            // onto the freshly-calculated on-hand stock value, so a manual
+            // batch edit/deletion can never leave the ledger silently out of
+            // sync.
+            app(InventorySyncService::class)->sync($businessId, $request->user()->id);
+
+            return response()->json($productBatch);
+        });
     }
 
     public function destroy(ProductBatch $productBatch): JsonResponse
@@ -444,6 +463,8 @@ class ProductBatchController extends Controller
         $productBatch->delete();
 
         $this->refreshProductMetrics($product);
+
+        app(InventorySyncService::class)->sync($productBatch->business_id);
 
         return response()->json(['message' => 'Product batch deleted.']);
     }
@@ -708,5 +729,68 @@ class ProductBatchController extends Controller
         if ($product && $product->has_batch) {
             $product->refreshMetrics();
         }
+    }
+
+    /**
+     * The on-hand cost value of a single batch, matching the exact costing
+     * rule InventoryValuationService applies to batch-managed products
+     * (remaining quantity times cost per unit, active and non-expired only).
+     * Used to measure how a manual quantity / total-cost edit changes the
+     * batch's contribution to the 1030 Inventory Asset account.
+     */
+    private function batchOnHandValue(ProductBatch $batch): float
+    {
+        if (! $batch->is_active) {
+            return 0.0;
+        }
+
+        if ($batch->expiry_date && $batch->expiry_date->isPast()) {
+            return 0.0;
+        }
+
+        return round(
+            ((float) $batch->quantity - (float) $batch->quantity_sold)
+                * (float) $batch->cost_per_unit,
+            2
+        );
+    }
+
+    /**
+     * Post the journal entry that books a manual batch quantity / cost edit:
+     * an increase in on-hand value debits 1030 and credits the equity offset
+     * (3010), a decrease debits the inventory-adjustment expense (5020) and
+     * credits 1030. Balanced by construction; a no-op when the delta is 0.
+     */
+    private function postManualBatchAdjustment(string $businessId, ProductBatch $batch, float $delta, ?int $userId = null): void
+    {
+        $amount = abs($delta);
+        $label = 'Manual Batch Adjustment - Batch: '.$batch->batch_number;
+
+        if ($delta > 0) {
+            $lines = [
+                ['code' => '1030', 'debit' => $amount, 'description' => $label],
+                ['code' => '3010', 'credit' => $amount, 'description' => $label],
+            ];
+        } else {
+            $lines = [
+                ['code' => '5020', 'debit' => $amount, 'description' => $label],
+                ['code' => '1030', 'credit' => $amount, 'description' => $label],
+            ];
+        }
+
+        app(AccountingService::class)->post($businessId, [
+            'date' => now()->toDateString(),
+            'description' => $label,
+            'reference_type' => 'manual_batch_adjustment',
+            'reference_id' => $batch->id,
+            'user_id' => $userId,
+            'metadata' => [
+                'batch_id' => $batch->id,
+                'product_id' => $batch->product_id,
+                'delta' => $delta,
+                'quantity' => (float) $batch->quantity,
+                'cost_per_unit' => (float) $batch->cost_per_unit,
+            ],
+        ], $lines);
     }
 }

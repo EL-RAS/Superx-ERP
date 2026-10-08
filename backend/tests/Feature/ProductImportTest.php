@@ -748,10 +748,8 @@ class ProductImportTest extends TestCase
         );
     }
 
-    public function test_manual_batch_store_dispatches_background_reconciliation_job(): void
+    public function test_manual_batch_store_reconciles_inventory_asset_in_real_time(): void
     {
-        Queue::fake();
-
         $product = Product::create([
             'business_id' => $this->business->id,
             'created_by' => $this->user->id,
@@ -775,10 +773,17 @@ class ProductImportTest extends TestCase
             'source_type' => 'manual_entry',
         ])->assertStatus(201);
 
-        Queue::assertPushed(
-            ReconcileInventoryAccounting::class,
-            fn (ReconcileInventoryAccounting $job) => $job->businessId === $this->business->id
-                && $job->userId === (int) $this->user->id,
+        // No background job is dispatched for a manual batch store: the 1030
+        // balance is reconciled synchronously inside the request, so the
+        // on-hand value is already mirrored onto the ledger.
+        $this->assertSame(5.0, $this->accountBalance('1030'));
+        $this->assertSame(5.0, app(InventorySyncService::class)->stockValue($this->business->id));
+        $this->assertSame(
+            0,
+            JournalEntry::withoutGlobalScope(BusinessScope::class)
+                ->where('business_id', $this->business->id)
+                ->where('reference_type', 'inventory_opening')
+                ->count(),
         );
     }
 
@@ -841,6 +846,221 @@ class ProductImportTest extends TestCase
         );
     }
 
+    public function test_manual_batch_quantity_reduction_posts_adjustment_and_reconciles(): void
+    {
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Edit Batch Item',
+            'sku' => 'EDIT-B',
+            'price' => 4.00,
+            'cost' => 2.00,
+            'tax_rate' => 0,
+            'stock_quantity' => 0,
+            'has_batch' => true,
+            'is_active' => true,
+            'unit' => 'pcs',
+        ]);
+
+        $batch = ProductBatch::create([
+            'business_id' => $this->business->id,
+            'product_id' => $product->id,
+            'batch_number' => 'EDIT-1',
+            'quantity' => 10,
+            'quantity_sold' => 0,
+            'cost_per_unit' => 2.00,
+            'total_cost' => 20.00,
+            'source_type' => 'goods_receipt',
+            'expiry_date' => now()->addYear()->toDateString(),
+            'is_active' => true,
+        ]);
+
+        // Establish the ledger: 10 units @ 2.00 = 20.00 on 1030.
+        app(InventorySyncService::class)->sync($this->business->id, (int) $this->user->id);
+        $this->assertSame(20.0, $this->accountBalance('1030'));
+
+        // Manual edit cuts the batch to 8 units @ 2.00 = 16.00.
+        $this->patchJson('/api/v1/product-batches/'.$batch->id, ['quantity' => 8])
+            ->assertStatus(200);
+
+        $adjustment = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('reference_type', 'manual_batch_adjustment')
+            ->latest('id')
+            ->first();
+        $this->assertNotNull($adjustment);
+        $this->assertStringContainsString('Manual Batch Adjustment - Batch: EDIT-1', $adjustment->description);
+        $this->assertSame(-4.0, $this->lineBalanceOf($adjustment->id, $this->accountId('1030')));
+
+        // Dr 5020 (expense) offset the 1030 credit, entry stays balanced, and
+        // the inventory asset now mirrors the on-hand value exactly.
+        $this->assertSame(4.0, $this->lineBalanceOf($adjustment->id, $this->accountId('5020')));
+        $this->assertSame(16.0, $this->accountBalance('1030'));
+        $this->assertSame(16.0, app(InventorySyncService::class)->stockValue($this->business->id));
+    }
+
+    public function test_manual_batch_quantity_zero_writes_off_batch_and_reconciles(): void
+    {
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Write Off Batch Item',
+            'sku' => 'WRITEOFF-B',
+            'price' => 4.00,
+            'cost' => 2.00,
+            'tax_rate' => 0,
+            'stock_quantity' => 0,
+            'has_batch' => true,
+            'is_active' => true,
+            'unit' => 'pcs',
+        ]);
+
+        $batch = ProductBatch::create([
+            'business_id' => $this->business->id,
+            'product_id' => $product->id,
+            'batch_number' => 'WRITEOFF-1',
+            'quantity' => 10,
+            'quantity_sold' => 0,
+            'cost_per_unit' => 2.00,
+            'total_cost' => 20.00,
+            'source_type' => 'goods_receipt',
+            'expiry_date' => now()->addYear()->toDateString(),
+            'is_active' => true,
+        ]);
+
+        app(InventorySyncService::class)->sync($this->business->id, (int) $this->user->id);
+        $this->assertSame(20.0, $this->accountBalance('1030'));
+
+        $this->patchJson('/api/v1/product-batches/'.$batch->id, ['quantity' => 0])
+            ->assertStatus(200);
+
+        $this->assertSame(0.0, $this->accountBalance('1030'));
+        $this->assertSame(0.0, app(InventorySyncService::class)->stockValue($this->business->id));
+
+        $adjustment = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('reference_type', 'manual_batch_adjustment')
+            ->latest('id')
+            ->first();
+        $this->assertNotNull($adjustment);
+        $this->assertSame(-20.0, $this->lineBalanceOf($adjustment->id, $this->accountId('1030')));
+        $this->assertSame(20.0, $this->lineBalanceOf($adjustment->id, $this->accountId('5020')));
+    }
+
+    public function test_manual_batch_cost_increase_posts_debit_1030_and_reconciles(): void
+    {
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Raise Cost Item',
+            'sku' => 'RAISE-B',
+            'price' => 4.00,
+            'cost' => 2.00,
+            'tax_rate' => 0,
+            'stock_quantity' => 0,
+            'has_batch' => true,
+            'is_active' => true,
+            'unit' => 'pcs',
+        ]);
+
+        $batch = ProductBatch::create([
+            'business_id' => $this->business->id,
+            'product_id' => $product->id,
+            'batch_number' => 'RAISE-1',
+            'quantity' => 10,
+            'quantity_sold' => 0,
+            'cost_per_unit' => 2.00,
+            'total_cost' => 20.00,
+            'source_type' => 'goods_receipt',
+            'expiry_date' => now()->addYear()->toDateString(),
+            'is_active' => true,
+        ]);
+
+        app(InventorySyncService::class)->sync($this->business->id, (int) $this->user->id);
+        $this->assertSame(20.0, $this->accountBalance('1030'));
+
+        // total_cost 20.00 -> 30.00 (quantity unchanged) revalues the batch.
+        $this->patchJson('/api/v1/product-batches/'.$batch->id, ['total_cost' => 30])
+            ->assertStatus(200);
+
+        $adjustment = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('reference_type', 'manual_batch_adjustment')
+            ->latest('id')
+            ->first();
+        $this->assertNotNull($adjustment);
+        $this->assertSame(10.0, $this->lineBalanceOf($adjustment->id, $this->accountId('1030')));
+        $this->assertSame(-10.0, $this->lineBalanceOf($adjustment->id, $this->accountId('3010')));
+
+        $this->assertSame(30.0, $this->accountBalance('1030'));
+        $this->assertSame(30.0, app(InventorySyncService::class)->stockValue($this->business->id));
+    }
+
+    public function test_manual_batch_reduction_stays_reconciled_without_double_posting(): void
+    {
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Reconcile Batch Item',
+            'sku' => 'RECON-B',
+            'price' => 4.00,
+            'cost' => 2.00,
+            'tax_rate' => 0,
+            'stock_quantity' => 0,
+            'has_batch' => true,
+            'is_active' => true,
+            'unit' => 'pcs',
+        ]);
+
+        $batch = ProductBatch::create([
+            'business_id' => $this->business->id,
+            'product_id' => $product->id,
+            'batch_number' => 'RECON-1',
+            'quantity' => 10,
+            'quantity_sold' => 0,
+            'cost_per_unit' => 2.00,
+            'total_cost' => 20.00,
+            'source_type' => 'goods_receipt',
+            'expiry_date' => now()->addYear()->toDateString(),
+            'is_active' => true,
+        ]);
+
+        app(InventorySyncService::class)->sync($this->business->id, (int) $this->user->id);
+        $before = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->count();
+
+        $this->patchJson('/api/v1/product-batches/'.$batch->id, ['quantity' => 6])
+            ->assertStatus(200);
+        $afterReduction = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->count();
+
+        // One adjustment entry (no residual inventory_opening net because the
+        // real-time sync inside the request finds a zero delta).
+        $this->assertSame($before + 1, $afterReduction);
+
+        $entriesAfterReduce = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('reference_type', 'inventory_opening')
+            ->count();
+
+        $this->patchJson('/api/v1/product-batches/'.$batch->id, ['quantity' => 2])
+            ->assertStatus(200);
+
+        // Second reduction posts one more adjustment; the ledger still matches
+        // on-hand value and no inventory_opening net was ever added.
+        $this->assertSame($afterReduction + 1, JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->count());
+        $this->assertSame($entriesAfterReduce, JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('reference_type', 'inventory_opening')
+            ->count());
+        $this->assertSame(4.0, $this->accountBalance('1030'));
+        $this->assertSame(4.0, app(InventorySyncService::class)->stockValue($this->business->id));
+    }
+
     private function accountId(string $code): int
     {
         return (int) Account::withoutGlobalScope(BusinessScope::class)
@@ -860,6 +1080,18 @@ class ProductImportTest extends TestCase
                 ->where('is_posted', true));
 
         return round((float) (clone $lines)->sum('debit') - (float) (clone $lines)->sum('credit'), 2);
+    }
+
+    private function lineBalanceOf(int $entryId, int $accountId): float
+    {
+        return round((float) JournalEntryLine::withoutGlobalScope(BusinessScope::class)
+            ->where('journal_entry_id', $entryId)
+            ->where('account_id', $accountId)
+            ->sum('debit')
+            - (float) JournalEntryLine::withoutGlobalScope(BusinessScope::class)
+                ->where('journal_entry_id', $entryId)
+                ->where('account_id', $accountId)
+                ->sum('credit'), 2);
     }
 
     private function makeXlsx(): UploadedFile
