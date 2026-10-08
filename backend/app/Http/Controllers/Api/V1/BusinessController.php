@@ -75,6 +75,7 @@ class BusinessController extends Controller
             'scale_barcode_parsing' => 'sometimes|boolean',
             'scale_barcode_prefix' => 'sometimes|nullable|string|max:5|regex:/^\d+$/',
             'expiry_warning_days' => 'sometimes|nullable|integer|min:1|max:365',
+            'inventory_costing_method' => 'sometimes|string|in:fefo,fifo',
         ], [
             'business_name.string' => 'The business name cannot be blank.',
             'business_name.not_regex' => 'The business name cannot be blank.',
@@ -116,7 +117,7 @@ class BusinessController extends Controller
         }
 
         $settings = $this->mergedSettings($business);
-        foreach (['allow_split_payments', 'allow_credit_sales', 'expiry_alerts', 'rapid_mode', 'loyalty_enabled', 'loyalty_earn_rate', 'loyalty_redemption_rate', 'loyalty_alert_threshold', 'promotions_enabled', 'low_stock_sensitivity', 'sales_invoice_prefix', 'purchase_order_prefix', 'grn_prefix', 'invoice_footer_terms', 'tax_enabled', 'default_tax_rate', 'tax_calculation_method', 'jofotara_enabled', 'jofotara_client_id', 'tax_number', 'phone', 'address', 'auto_print_receipt', 'receipt_paper_width', 'receipt_footer_message', 'allow_negative_stock', 'scale_barcode_parsing', 'scale_barcode_prefix', 'expiry_warning_days'] as $key) {
+        foreach (['allow_split_payments', 'allow_credit_sales', 'expiry_alerts', 'rapid_mode', 'loyalty_enabled', 'loyalty_earn_rate', 'loyalty_redemption_rate', 'loyalty_alert_threshold', 'promotions_enabled', 'low_stock_sensitivity', 'sales_invoice_prefix', 'purchase_order_prefix', 'grn_prefix', 'invoice_footer_terms', 'tax_enabled', 'default_tax_rate', 'tax_calculation_method', 'jofotara_enabled', 'jofotara_client_id', 'tax_number', 'phone', 'address', 'auto_print_receipt', 'receipt_paper_width', 'receipt_footer_message', 'allow_negative_stock', 'scale_barcode_parsing', 'scale_barcode_prefix', 'expiry_warning_days', 'inventory_costing_method'] as $key) {
             if (array_key_exists($key, $validated)) {
                 $settings[$key] = $validated[$key];
             }

@@ -12,19 +12,22 @@ use App\Models\PurchaseOrderPayment;
 use App\Models\StockMovement;
 use App\Rules\ProductQuantity;
 use App\Services\AccountingService;
+use App\Services\InventorySyncService;
 use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class ProductBatchController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
         $query = ProductBatch::query()->with([
-            'product:id,name,sku,unit',
+            'product:id,name,sku,unit,has_batch',
             'supplier:id,name',
             'goodsReceipt:id,receipt_number,supplier_id',
         ]);
@@ -71,77 +74,120 @@ class ProductBatchController extends Controller
         $batches = $query->orderBy('expiry_date', 'asc')
             ->paginate($request->integer('per_page', 10));
 
-        $riskCutoff = now()->addDays((int) ($request->user()->business->mergedSettings()['expiry_warning_days'] ?? 30));
-        $valueAtRisk = ProductBatch::query()
-            ->where('expiry_date', '<=', $riskCutoff)
+        $today = now()->startOfDay();
+        $warningDays = (int) ($request->user()->business->mergedSettings()['expiry_warning_days'] ?? 30);
+        $cutoff = $today->copy()->addDays($warningDays);
+
+        // Valuation is computed per batch from on-hand stock (net of FEFO
+        // sales and returns) at the batch unit cost. Expired stock is valued
+        // separately; "active" covers every non-expired batch, including the
+        // expiring-soon window (so active is the superset of expiring_soon).
+        $summary = [
+            'active_value' => 0.0,
+            'expiring_soon_value' => 0.0,
+            'expired_value' => 0.0,
+        ];
+
+        ProductBatch::query()
             ->whereRaw('(quantity - quantity_sold - COALESCE(quantity_returned, 0)) > 0')
-            ->with('product:id,price')
-            ->get()
-            ->sum(fn ($b) => ((float) $b->quantity - (float) $b->quantity_sold - (float) ($b->quantity_returned ?? 0)) * (float) ($b->product?->price ?? 0));
+            ->get(['quantity', 'quantity_sold', 'quantity_returned', 'cost_per_unit', 'expiry_date'])
+            ->each(function ($batch) use (&$summary, $today, $cutoff) {
+                $value = ((float) $batch->quantity - (float) $batch->quantity_sold - (float) ($batch->quantity_returned ?? 0)) * (float) $batch->cost_per_unit;
+
+                if ($batch->expiry_date === null) {
+                    $summary['active_value'] += $value;
+                } elseif ($batch->expiry_date->lte($today)) {
+                    $summary['expired_value'] += $value;
+                } elseif ($batch->expiry_date->lte($cutoff)) {
+                    $summary['expiring_soon_value'] += $value;
+                    $summary['active_value'] += $value;
+                } else {
+                    $summary['active_value'] += $value;
+                }
+            });
 
         return response()->json([
             ...$batches->toArray(),
-            'value_at_risk' => round($valueAtRisk, 2),
+            'summary' => [
+                'active_value' => round($summary['active_value'], 2),
+                'expiring_soon_value' => round($summary['expiring_soon_value'], 2),
+                'expired_value' => round($summary['expired_value'], 2),
+            ],
         ]);
     }
 
     public function store(Request $request): JsonResponse
     {
-        $productId = $request->input('product_id');
         $businessId = $request->user()->business_id;
+        $productId = $request->input('product_id');
 
         $validated = $request->validate([
-            'product_id' => 'required|exists:products,id',
+            'product_id' => [
+                'required',
+                Rule::exists('products', 'id')
+                    ->where(fn ($query) => $query->where('business_id', $businessId)->whereNull('deleted_at')),
+            ],
             'batch_number' => [
                 'required',
                 'string',
+                'min:1',
+                'max:100',
                 Rule::unique('product_batches', 'batch_number')
                     ->where(fn ($query) => $query->where('business_id', $businessId)->where('product_id', $productId)),
             ],
             'source_type' => 'nullable|string|in:opening_stock,stock_count_finding,manual_entry',
-            'quantity' => ['required', 'numeric', 'min:0', ProductQuantity::forProduct((string) ($productId ?? ''))],
+            'quantity' => ['required', 'numeric', 'min:0.000001', ProductQuantity::forProduct((string) ($productId ?? ''), 2)],
             'expiry_date' => 'nullable|date',
             'manufacturing_date' => 'nullable|date',
             'total_cost' => 'required|numeric|min:0',
             'selling_price' => 'nullable|numeric|min:0',
-            'supplier_id' => 'nullable|exists:suppliers,id',
+            'supplier_id' => [
+                'nullable',
+                Rule::exists('suppliers', 'id')->where('business_id', $businessId),
+            ],
             'received_date' => 'nullable|date',
-            'storage_location' => 'nullable|string',
+            'storage_location' => 'nullable|string|max:255',
             'metadata' => 'nullable|array',
             'payment_method' => 'nullable|string|in:cash,bank,credit',
         ]);
 
+        $this->assertDatesAreConsistent($validated);
+
         $validated['business_id'] = $businessId;
-
         $validated['source_type'] = $validated['source_type'] ?? 'manual_entry';
-
+        $validated['quantity'] = round((float) $validated['quantity'], 2);
         $validated['cost_per_unit'] = $validated['quantity'] > 0
-            ? round($validated['total_cost'] / $validated['quantity'], 2)
+            ? round(((float) $validated['total_cost']) / $validated['quantity'], 2)
             : 0;
 
-        $batch = ProductBatch::create($validated);
+        return DB::transaction(function () use ($request, $validated, $businessId) {
+            $batch = ProductBatch::create($validated);
 
-        $batch->load('product');
-        $batch->product?->refreshMetrics();
+            $batch->load('product');
+            $this->refreshProductMetrics($batch->product);
 
-        if ((float) $batch->total_cost > 0) {
-            app(AccountingService::class)->postGoodsReceiptEntry(
-                $businessId,
-                (float) $batch->total_cost,
-                $batch->id,
-                $request->user()->id,
-                'Goods received - batch '.$batch->batch_number,
-                [
-                    'batch_id' => $batch->id,
-                    'product_id' => $batch->product_id,
-                    'quantity' => (float) $batch->quantity,
-                    'total_cost' => (float) $batch->total_cost,
-                ],
-                $validated['payment_method'] ?? 'credit'
-            );
-        }
+            if ((float) $batch->total_cost > 0) {
+                app(AccountingService::class)->postGoodsReceiptEntry(
+                    $businessId,
+                    (float) $batch->total_cost,
+                    $batch->id,
+                    $request->user()->id,
+                    'Goods received - batch '.$batch->batch_number,
+                    [
+                        'batch_id' => $batch->id,
+                        'product_id' => $batch->product_id,
+                        'quantity' => (float) $batch->quantity,
+                        'total_cost' => (float) $batch->total_cost,
+                    ],
+                    $validated['payment_method'] ?? 'credit'
+                );
+            }
 
-        return response()->json($batch, 201);
+            app(InventorySyncService::class)
+                ->queueReconcile($businessId, $request->user()->id);
+
+            return response()->json($batch, 201);
+        });
     }
 
     public function grnReceive(Request $request): JsonResponse
@@ -297,6 +343,9 @@ class ProductBatchController extends Controller
                 app(AccountingService::class)->postSupplierPaymentEntry($businessId, $payment, $request->user()->id);
             }
 
+            app(InventorySyncService::class)
+                ->queueReconcile($businessId, $request->user()->id);
+
             return response()->json([
                 'message' => 'Goods received successfully.',
                 'batches' => ProductBatch::withoutGlobalScopes()
@@ -319,24 +368,39 @@ class ProductBatchController extends Controller
         $businessId = $request->user()->business_id;
 
         $validated = $request->validate([
-            'product_id' => 'sometimes|exists:products,id',
+            'product_id' => [
+                'sometimes',
+                Rule::exists('products', 'id')
+                    ->where(fn ($query) => $query->where('business_id', $businessId)->whereNull('deleted_at')),
+            ],
             'batch_number' => [
                 'sometimes',
                 'string',
+                'min:1',
+                'max:100',
                 Rule::unique('product_batches', 'batch_number')
                     ->where(fn ($query) => $query->where('business_id', $businessId)->where('product_id', $request->input('product_id') ?? $productBatch->product_id))
                     ->ignore($productBatch->id),
             ],
-            'quantity' => ['sometimes', 'numeric', 'min:0', ProductQuantity::forProduct((string) ($request->input('product_id') ?? $productBatch->product_id ?? ''))],
-            'expiry_date' => 'sometimes|date',
+            'quantity' => ['sometimes', 'numeric', 'min:0', ProductQuantity::forProduct((string) ($request->input('product_id') ?? $productBatch->product_id ?? ''), 2)],
+            'expiry_date' => 'sometimes|nullable|date',
             'manufacturing_date' => 'nullable|date',
             'total_cost' => 'sometimes|numeric|min:0',
             'selling_price' => 'nullable|numeric|min:0',
-            'supplier_id' => 'nullable|exists:suppliers,id',
+            'supplier_id' => [
+                'nullable',
+                Rule::exists('suppliers', 'id')->where('business_id', $businessId),
+            ],
             'received_date' => 'nullable|date',
-            'storage_location' => 'nullable|string',
+            'storage_location' => 'nullable|string|max:255',
             'metadata' => 'nullable|array',
         ]);
+
+        $this->assertDatesAreConsistent($validated, $productBatch);
+
+        if (isset($validated['batch_number'])) {
+            $validated['batch_number'] = trim($validated['batch_number']);
+        }
 
         if (isset($validated['total_cost'])) {
             $qty = $validated['quantity'] ?? $productBatch->quantity;
@@ -358,7 +422,7 @@ class ProductBatchController extends Controller
         $productBatch->update($validated);
 
         $productBatch->load('product');
-        $productBatch->product?->refreshMetrics();
+        $this->refreshProductMetrics($productBatch->product);
 
         return response()->json($productBatch);
     }
@@ -373,13 +437,13 @@ class ProductBatchController extends Controller
 
         if ($remaining > 0.001) {
             throw new InsufficientStockException(
-                "Cannot delete batch {$productBatch->batch_number}: it still has {$remaining} units of sellable stock. Adjust the batch to zero before deleting."
+                'Cannot delete a batch with remaining stock. Please adjust the stock to zero before deleting.'
             );
         }
 
         $productBatch->delete();
 
-        $product?->refreshMetrics();
+        $this->refreshProductMetrics($product);
 
         return response()->json(['message' => 'Product batch deleted.']);
     }
@@ -405,9 +469,7 @@ class ProductBatchController extends Controller
 
             $productBatch->increment('quantity_sold', $validated['quantity']);
 
-            if ($productBatch->product) {
-                $productBatch->product->refreshMetrics();
-            }
+            $this->refreshProductMetrics($productBatch->product);
 
             $unitCost = (float) ($productBatch->cost_per_unit ?? 0);
             if ($unitCost <= 0 && $productBatch->product) {
@@ -419,6 +481,7 @@ class ProductBatchController extends Controller
                 $movement = StockMovement::create([
                     'business_id' => $businessId,
                     'product_id' => $productBatch->product_id,
+                    'batch_id' => $productBatch->id,
                     'quantity' => $validated['quantity'],
                     'type' => 'reduction',
                     'reference_type' => 'batch_sale',
@@ -470,7 +533,7 @@ class ProductBatchController extends Controller
             $cogs = round($cogs, 2);
 
             if ($cogs > 0) {
-                $movement = StockMovement::create([
+                $movements = StockMovement::recordDeductions([
                     'business_id' => $businessId,
                     'product_id' => $productId,
                     'quantity' => $quantityNeeded,
@@ -478,13 +541,13 @@ class ProductBatchController extends Controller
                     'reference_type' => 'fefo_sale',
                     'reference_id' => $productId,
                     'notes' => 'FEFO sale',
-                ]);
+                ], $deductions);
 
                 app(AccountingService::class)->post($businessId, [
                     'date' => now()->toDateString(),
                     'description' => 'FEFO sale',
                     'reference_type' => 'fefo_sale',
-                    'reference_id' => $movement->id,
+                    'reference_id' => $movements[0]->id,
                     'user_id' => $request->user()->id,
                     'metadata' => [
                         'product_id' => $productId,
@@ -558,7 +621,7 @@ class ProductBatchController extends Controller
             ]);
 
             $productBatch->load('product');
-            $productBatch->product?->refreshMetrics();
+            $this->refreshProductMetrics($productBatch->product);
 
             $amount = round(abs($adjustment) * $unitCost, 2);
             if ($amount > 0) {
@@ -605,5 +668,45 @@ class ProductBatchController extends Controller
             ->paginate($request->integer('per_page', 10));
 
         return response()->json($products);
+    }
+
+    /**
+     * A batch cannot expire before it was manufactured. The two dates are
+     * validated independently by the rules, so the cross-field check lives
+     * here and surfaces as a normal 422 on `expiry_date`.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function assertDatesAreConsistent(array $validated, ?ProductBatch $existing = null): void
+    {
+        $expiry = array_key_exists('expiry_date', $validated)
+            ? $validated['expiry_date']
+            : $existing?->expiry_date;
+        $manufacturing = array_key_exists('manufacturing_date', $validated)
+            ? $validated['manufacturing_date']
+            : $existing?->manufacturing_date;
+
+        if (empty($expiry) || empty($manufacturing)) {
+            return;
+        }
+
+        if (Carbon::parse($expiry)->startOfDay()->lt(Carbon::parse($manufacturing)->startOfDay())) {
+            throw ValidationException::withMessages([
+                'expiry_date' => 'The expiry date must be on or after the manufacturing date.',
+            ]);
+        }
+    }
+
+    /**
+     * Only batch-managed products derive `stock_quantity` from their batches.
+     * Simple products own that column outright (backed by their goods-receipt
+     * cost layers), so recomputing it from a stray batch would wipe their
+     * on-hand stock.
+     */
+    private function refreshProductMetrics(?Product $product): void
+    {
+        if ($product && $product->has_batch) {
+            $product->refreshMetrics();
+        }
     }
 }

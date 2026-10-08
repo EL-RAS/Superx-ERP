@@ -417,7 +417,7 @@ export interface PaginatedResponse<T> {
   prev_page_url: string | null;
   counters?: { out_of_stock: number; low_stock: number; total: number };
   reorder_cost?: number;
-  value_at_risk?: number;
+  summary?: { active_value: number; expiring_soon_value: number; expired_value: number };
 }
 
 export interface Product {

@@ -2,15 +2,25 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ReconcileInventoryAccounting;
+use App\Models\Account;
 use App\Models\Business;
 use App\Models\BusinessType;
+use App\Models\JournalEntry;
+use App\Models\JournalEntryLine;
 use App\Models\Product;
 use App\Models\ProductBatch;
+use App\Models\PurchaseOrder;
+use App\Models\PurchaseOrderItem;
 use App\Models\Role;
+use App\Models\Supplier;
 use App\Models\User;
+use App\Scopes\BusinessScope;
+use App\Services\InventorySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -384,10 +394,474 @@ class ProductImportTest extends TestCase
         ])->assertStatus(403);
     }
 
-    /**
-     * Build a minimal, valid .xlsx file backed by ZipArchive.
-     * Uses an inline (t = "inlineStr") worksheet to avoid shared strings.
-     */
+    public function test_csv_import_posts_opening_stock_journal_entry(): void
+    {
+        $csv = "barcode,name,cost_price,selling_price,stock_quantity\n"
+            ."6291041500213,GL Apple,0.50,1.20,50\n";
+
+        $file = UploadedFile::fake()->createWithContent('products.csv', $csv);
+
+        $this->postJson('/api/v1/products/import', ['file' => $file])
+            ->assertStatus(200)
+            ->assertJson(['created' => 1]);
+
+        $product = Product::where('barcode', '6291041500213')->firstOrFail();
+        $batch = ProductBatch::where('product_id', $product->id)->firstOrFail();
+
+        // Imported opening stock is recognised on the ledger immediately:
+        // Dr 1030 = quantity × cost, Cr 3010 (owner capital), one entry per
+        // IMP-INIT batch, reference_type + batch id for idempotency.
+        $entry = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('reference_type', 'import_opening_stock')
+            ->where('reference_id', $batch->id)
+            ->first();
+
+        $this->assertNotNull($entry);
+        $this->assertSame(1, (int) $entry->is_posted);
+        $this->assertSame('Import Opening Stock - Batch: '.$batch->batch_number, $entry->description);
+
+        $lines = JournalEntryLine::withoutGlobalScope(BusinessScope::class)
+            ->where('journal_entry_id', $entry->id)
+            ->get();
+
+        $this->assertSame(2, $lines->count());
+        $this->assertSame(25.0, (float) $lines->where('account_id', $this->accountId('1030'))->first()->debit);
+        $this->assertSame(25.0, (float) $lines->where('account_id', $this->accountId('3010'))->first()->credit);
+        $this->assertSame(
+            round((float) $lines->sum('debit'), 2),
+            round((float) $lines->sum('credit'), 2),
+        );
+
+        // The Inventory Asset account now holds exactly the imported value.
+        $this->assertSame(25.0, $this->accountBalance('1030'));
+        $this->assertSame(25.0, app(InventorySyncService::class)->stockValue($this->business->id));
+    }
+
+    public function test_csv_import_with_zero_cost_posts_no_entry(): void
+    {
+        $csv = "barcode,name,cost_price,stock_quantity\n"
+            ."6291041500213,Free GL Apple,0,50\n";
+
+        $file = UploadedFile::fake()->createWithContent('products.csv', $csv);
+
+        $this->postJson('/api/v1/products/import', ['file' => $file])
+            ->assertStatus(200)
+            ->assertJson(['created' => 1]);
+
+        // A zero-value batch creates no journal entry (nothing to recognise).
+        $this->assertSame(
+            0,
+            JournalEntry::withoutGlobalScope(BusinessScope::class)
+                ->where('business_id', $this->business->id)
+                ->where('reference_type', 'import_opening_stock')
+                ->count(),
+        );
+        $this->assertSame(0.0, $this->accountBalance('1030'));
+    }
+
+    public function test_csv_import_to_existing_product_posts_per_batch_entry(): void
+    {
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Old Importer',
+            'barcode' => '6291041500213',
+            'sku' => 'IMP-EXIST',
+            'price' => 1.00,
+            'cost' => 0.40,
+            'tax_rate' => 0,
+            'stock_quantity' => 10,
+            'has_batch' => true,
+            'is_active' => true,
+            'min_stock' => 0,
+            'unit' => 'pcs',
+        ]);
+
+        ProductBatch::create([
+            'business_id' => $this->business->id,
+            'product_id' => $product->id,
+            'batch_number' => 'SEED-OLD',
+            'quantity' => 10,
+            'cost_per_unit' => 0.40,
+            'total_cost' => 4.00,
+            'selling_price' => 1.00,
+            'received_date' => now()->toDateString(),
+            'is_active' => true,
+        ]);
+
+        $csv = "barcode,name,cost_price,selling_price,stock_quantity\n"
+            ."6291041500213,Old Importer,0.60,1.50,5\n";
+
+        $file = UploadedFile::fake()->createWithContent('products.csv', $csv);
+
+        $this->postJson('/api/v1/products/import', ['file' => $file])
+            ->assertStatus(200)
+            ->assertJson(['created' => 0, 'updated' => 1]);
+
+        // Exactly one new import entry for the new IMP-INIT batch (the seeded
+        // legacy batch predates the feature and carries no entry).
+        $entries = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('reference_type', 'import_opening_stock')
+            ->get();
+
+        $this->assertCount(1, $entries);
+
+        $batch = ProductBatch::where('product_id', $product->id)
+            ->where('source_type', null)
+            ->latest('id')
+            ->firstOrFail();
+        $this->assertSame((int) $batch->id, (int) $entries->first()->reference_id);
+
+        // The auto-reconcile safety net also closes the pre-existing legacy
+        // drift (SEED-OLD 10 × 0.40 = 4.00 had no entry), so 1030 comes to
+        // rest at the FULL real valuation: new batch 3.00 + legacy 4.00.
+        $this->assertSame(5.0, (float) $batch->quantity);
+        $this->assertSame(7.0, app(InventorySyncService::class)->stockValue($this->business->id));
+        $this->assertSame(7.0, $this->accountBalance('1030'));
+        $this->assertSame(
+            1,
+            JournalEntry::withoutGlobalScope(BusinessScope::class)
+                ->where('business_id', $this->business->id)
+                ->where('reference_type', 'inventory_opening')
+                ->count(),
+        );
+    }
+
+    public function test_quick_add_posts_opening_stock_journal_entry(): void
+    {
+        $this->postJson('/api/v1/products/quick-add', [
+            'name' => 'GL Snack',
+            'barcode' => '6291041500888',
+            'selling_price' => 3.50,
+            'cost' => 1.25,
+        ])->assertStatus(201);
+
+        $product = Product::where('name', 'GL Snack')->firstOrFail();
+        $batch = ProductBatch::where('product_id', $product->id)->firstOrFail();
+
+        $entry = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('reference_type', 'import_opening_stock')
+            ->where('reference_id', $batch->id)
+            ->first();
+
+        $this->assertNotNull($entry);
+        $this->assertStringStartsWith('Import Opening Stock - Batch: ', $entry->description);
+
+        $lines = JournalEntryLine::withoutGlobalScope(BusinessScope::class)
+            ->where('journal_entry_id', $entry->id)
+            ->get();
+
+        $this->assertSame(1.25, (float) $lines->where('account_id', $this->accountId('1030'))->first()->debit);
+        $this->assertSame(1.25, (float) $lines->where('account_id', $this->accountId('3010'))->first()->credit);
+        $this->assertSame(1.25, $this->accountBalance('1030'));
+    }
+
+    public function test_imported_stock_parity_after_pos_sale_and_sync(): void
+    {
+        $csv = "barcode,name,cost_price,selling_price,stock_quantity,tax_rate\n"
+            ."6291041500213,Parity Apple,0.50,1.20,10,0\n";
+
+        $file = UploadedFile::fake()->createWithContent('products.csv', $csv);
+
+        $this->postJson('/api/v1/products/import', ['file' => $file])->assertStatus(200);
+
+        // Post-import: 1030 == valuation.
+        $this->assertSame(5.0, $this->accountBalance('1030'));
+        $this->assertSame(5.0, app(InventorySyncService::class)->stockValue($this->business->id));
+
+        // Sell 4 units at cost 0.50 → COGS Dr 5010 (2.00) / Cr 1030 (2.00).
+        $product = Product::where('barcode', '6291041500213')->firstOrFail();
+        $this->postJson('/api/v1/invoices', [
+            'payment_method' => 'cash',
+            'payment_status' => 'paid',
+            'items' => [['product_id' => $product->id, 'name' => 'Parity Apple', 'quantity' => 4, 'unit_price' => 1.2, 'tax_rate' => 0]],
+        ])->assertStatus(201);
+
+        // Ledger tracks the exact remaining 6 × 0.50 = 3.00.
+        $this->assertSame(3.0, $this->accountBalance('1030'));
+        $this->assertSame(3.0, app(InventorySyncService::class)->stockValue($this->business->id));
+
+        // The sync command finds nothing left to repair.
+        $this->artisan('inventory:sync-accounting', ['--business' => $this->business->slug])
+            ->assertExitCode(0);
+        $this->assertSame(3.0, app(InventorySyncService::class)->stockValue($this->business->id));
+        $this->assertSame(
+            1,
+            JournalEntry::withoutGlobalScope(BusinessScope::class)
+                ->where('business_id', $this->business->id)
+                ->where('reference_type', 'import_opening_stock')
+                ->count(),
+        );
+    }
+
+    public function test_inventory_sync_repairs_drifted_import_batches(): void
+    {
+        // A legacy batch that predates the auto-posting fix (no journal entry).
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Legacy Item',
+            'barcode' => '6291041500877',
+            'sku' => 'LEGACY',
+            'price' => 2.00,
+            'cost' => 0.50,
+            'tax_rate' => 0,
+            'stock_quantity' => 20,
+            'has_batch' => true,
+            'is_active' => true,
+            'min_stock' => 0,
+            'unit' => 'pcs',
+        ]);
+
+        ProductBatch::create([
+            'business_id' => $this->business->id,
+            'product_id' => $product->id,
+            'batch_number' => 'IMP-INIT-'.$product->id.'-1',
+            'quantity' => 20,
+            'cost_per_unit' => 0.50,
+            'total_cost' => 10.00,
+            'selling_price' => 2.00,
+            'received_date' => now()->toDateString(),
+            'is_active' => true,
+        ]);
+
+        $product->fresh()->recalculateStockQuantity();
+
+        // Actual stock value 10.00, but 1030 sits at 0.00 (the import never
+        // posted). The sync command closes the gap with a balanced entry.
+        $this->assertSame(10.0, app(InventorySyncService::class)->stockValue($this->business->id));
+        $this->assertSame(0.0, $this->accountBalance('1030'));
+
+        $this->artisan('inventory:sync-accounting', ['--business' => $this->business->slug])
+            ->assertExitCode(0);
+
+        $this->assertSame(10.0, $this->accountBalance('1030'));
+        $this->assertSame(
+            10.0,
+            (float) Account::withoutGlobalScope(BusinessScope::class)
+                ->where('business_id', $this->business->id)
+                ->where('code', '3010')
+                ->firstOrFail()
+                ->balance,
+        );
+
+        $syncEntry = JournalEntry::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('reference_type', 'inventory_opening')
+            ->first();
+        $this->assertNotNull($syncEntry);
+        $this->assertSame(1, (int) $syncEntry->is_posted);
+
+        // Running again is a no-op (self-correcting delta math).
+        $this->artisan('inventory:sync-accounting', ['--business' => $this->business->slug])
+            ->assertExitCode(0);
+        $this->assertSame(10.0, $this->accountBalance('1030'));
+        $this->assertSame(
+            1,
+            JournalEntry::withoutGlobalScope(BusinessScope::class)
+                ->where('business_id', $this->business->id)
+                ->where('reference_type', 'inventory_opening')
+                ->count(),
+        );
+    }
+
+    public function test_bulk_import_dispatches_background_reconciliation_job(): void
+    {
+        Queue::fake();
+
+        $csv = "barcode,name,cost_price,selling_price,stock_quantity,tax_rate\n"
+            ."6291041500213,Trigger Apple,0.50,1.20,10,0\n";
+
+        $this->postJson('/api/v1/products/import', [
+            'file' => UploadedFile::fake()->createWithContent('products.csv', $csv),
+        ])->assertStatus(200);
+
+        Queue::assertPushed(
+            ReconcileInventoryAccounting::class,
+            fn (ReconcileInventoryAccounting $job) => $job->businessId === $this->business->id
+                && $job->userId === (int) $this->user->id,
+        );
+    }
+
+    public function test_grn_approval_dispatches_background_reconciliation_job(): void
+    {
+        Queue::fake();
+
+        $supplier = Supplier::create([
+            'business_id' => $this->business->id,
+            'name' => 'GRN Supplier',
+            'phone' => '+962788888888',
+        ]);
+
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'GRN Trigger Item',
+            'sku' => 'GRN-TRIG',
+            'price' => 3.00,
+            'cost' => 2.00,
+            'tax_rate' => 0,
+            'stock_quantity' => 0,
+            'has_batch' => true,
+            'is_active' => true,
+            'min_stock' => 0,
+            'unit' => 'pcs',
+        ]);
+
+        $po = PurchaseOrder::create([
+            'business_id' => $this->business->id,
+            'supplier_id' => $supplier->id,
+            'user_id' => $this->user->id,
+            'order_number' => 'PO-'.strtoupper(Str::random(6)),
+            'status' => 'ordered',
+            'total_amount' => 8,
+        ]);
+
+        $poItem = PurchaseOrderItem::create([
+            'business_id' => $this->business->id,
+            'purchase_order_id' => $po->id,
+            'product_id' => $product->id,
+            'name' => 'GRN Trigger Item',
+            'quantity' => 1,
+            'unit_cost' => 8,
+            'total' => 8,
+        ]);
+
+        $this->postJson('/api/v1/goods-receipts', [
+            'purchase_order_id' => $po->id,
+            'items' => [[
+                'purchase_order_item_id' => $poItem->id,
+                'product_id' => $product->id,
+                'received_quantity' => 1,
+                'unit_cost' => 8,
+                'expiry_date' => now()->addMonths(6)->toDateString(),
+            ]],
+        ])->assertStatus(201);
+
+        Queue::assertPushed(
+            ReconcileInventoryAccounting::class,
+            fn (ReconcileInventoryAccounting $job) => $job->businessId === $this->business->id
+                && $job->userId === (int) $this->user->id,
+        );
+    }
+
+    public function test_manual_batch_store_dispatches_background_reconciliation_job(): void
+    {
+        Queue::fake();
+
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Manual Batch Item',
+            'sku' => 'MANUAL-B',
+            'price' => 2.00,
+            'cost' => 1.00,
+            'tax_rate' => 0,
+            'stock_quantity' => 0,
+            'has_batch' => true,
+            'is_active' => true,
+            'min_stock' => 0,
+            'unit' => 'pcs',
+        ]);
+
+        $this->postJson('/api/v1/product-batches', [
+            'product_id' => $product->id,
+            'batch_number' => 'MANUAL-1',
+            'quantity' => 5,
+            'total_cost' => 5,
+            'source_type' => 'manual_entry',
+        ])->assertStatus(201);
+
+        Queue::assertPushed(
+            ReconcileInventoryAccounting::class,
+            fn (ReconcileInventoryAccounting $job) => $job->businessId === $this->business->id
+                && $job->userId === (int) $this->user->id,
+        );
+    }
+
+    public function test_background_reconciliation_job_closes_ledger_drift(): void
+    {
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Drifted Item',
+            'barcode' => '6291041500999',
+            'sku' => 'DRIFT',
+            'price' => 2.00,
+            'cost' => 0.50,
+            'tax_rate' => 0,
+            'stock_quantity' => 20,
+            'has_batch' => true,
+            'is_active' => true,
+            'min_stock' => 0,
+            'unit' => 'pcs',
+        ]);
+
+        ProductBatch::create([
+            'business_id' => $this->business->id,
+            'product_id' => $product->id,
+            'batch_number' => 'DRIFT-1',
+            'quantity' => 20,
+            'cost_per_unit' => 0.50,
+            'total_cost' => 10.00,
+            'selling_price' => 2.00,
+            'received_date' => now()->toDateString(),
+            'is_active' => true,
+        ]);
+
+        $product->fresh()->recalculateStockQuantity();
+
+        $this->assertSame(10.0, app(InventorySyncService::class)->stockValue($this->business->id));
+        $this->assertSame(0.0, $this->accountBalance('1030'));
+
+        $job = new ReconcileInventoryAccounting($this->business->id, (int) $this->user->id);
+        $job->handle(app(InventorySyncService::class));
+
+        $this->assertSame(10.0, $this->accountBalance('1030'));
+        $this->assertSame(
+            1,
+            JournalEntry::withoutGlobalScope(BusinessScope::class)
+                ->where('business_id', $this->business->id)
+                ->where('reference_type', 'inventory_opening')
+                ->count(),
+        );
+
+        // Idempotent: running the job again is a no-op.
+        $job->handle(app(InventorySyncService::class));
+        $this->assertSame(10.0, $this->accountBalance('1030'));
+        $this->assertSame(
+            1,
+            JournalEntry::withoutGlobalScope(BusinessScope::class)
+                ->where('business_id', $this->business->id)
+                ->where('reference_type', 'inventory_opening')
+                ->count(),
+        );
+    }
+
+    private function accountId(string $code): int
+    {
+        return (int) Account::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('code', $code)
+            ->value('id');
+    }
+
+    private function accountBalance(string $code): float
+    {
+        $lines = JournalEntryLine::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->where('account_id', $this->accountId($code))
+            ->whereHas('journalEntry', fn ($query) => $query
+                ->withoutGlobalScope(BusinessScope::class)
+                ->where('business_id', $this->business->id)
+                ->where('is_posted', true));
+
+        return round((float) (clone $lines)->sum('debit') - (float) (clone $lines)->sum('credit'), 2);
+    }
+
     private function makeXlsx(): UploadedFile
     {
         $sheet = '<?xml version="1.0"?>'

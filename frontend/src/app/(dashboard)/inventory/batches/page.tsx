@@ -3,9 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { useAuthStore } from "@/stores/auth-store";
-import { ProductBatches, Products, Suppliers, GoodsReceipts } from "@/lib/api";
+import { ProductBatches, Products, Suppliers, GoodsReceipts, ApiError } from "@/lib/api";
 import type { ProductBatch, Product, Supplier, GoodsReceipt } from "@/lib/types";
 import { formatCurrency } from "@/lib/types";
+import { mapFieldErrors } from "@/lib/validation";
 import { usePagination } from "@/lib/pagination";
 import { useI18n } from "@/lib/i18n";
 import PageHeader from "@/components/ui/PageHeader";
@@ -15,7 +16,7 @@ import SlideOver from "@/components/ui/SlideOver";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 import KPICard from "@/components/ui/KPICard";
-import { AlertTriangle, Layers, Plus, Search } from "lucide-react";
+import { AlertTriangle, CalendarX2, Layers, Package, Plus, Search } from "lucide-react";
 
 function getBatchStatus(qty: number, expiry: string | null, t: (key: string) => string): { label: string; color: string } {
   if (qty === 0) return { label: t("batches.status_depleted"), color: "bg-gray-500/20 text-gray-400 border-gray-500/30" };
@@ -66,7 +67,7 @@ export default function BatchesPage() {
   // so only the current selection is held here.
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [valueAtRisk, setValueAtRisk] = useState(0);
+  const [summary, setSummary] = useState({ active_value: 0, expiring_soon_value: 0, expired_value: 0 });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const { page, perPage, setPage, resetPage, changePageSize } = usePagination();
@@ -74,6 +75,10 @@ export default function BatchesPage() {
   const [editing, setEditing] = useState<ProductBatch | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [previewGrn, setPreviewGrn] = useState<GoodsReceipt | null>(null);
@@ -81,6 +86,43 @@ export default function BatchesPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const isPiece = selectedProduct?.unit === "pcs";
+  const showBatchExpiry = selectedProduct?.has_batch === true || showExpiry;
+
+  const inputCls = (err?: string) =>
+    `w-full px-4 py-2.5 bg-card/80 border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover transition-colors ${err ? "border-red-500/60" : "border-border"}`;
+
+  const fieldErr = (k: string) =>
+    formErrors[k] && <p className="text-xs text-red-400 mt-1">{formErrors[k]}</p>;
+
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(timeout);
+  }, [toast]);
+
+  const validateForm = (): Record<string, string> => {
+    const errs: Record<string, string> = {};
+    if (!form.product_id) errs.product_id = t("batches.error_product_required");
+    if (!form.batch_number.trim()) errs.batch_number = t("batches.error_batch_number_required");
+    const qty = Number(form.quantity);
+    if (form.quantity === "" || Number.isNaN(qty) || qty < 0 || (!editing && qty === 0)) {
+      errs.quantity = t("batches.error_quantity_invalid");
+    } else if (isPiece && !Number.isInteger(qty)) {
+      errs.quantity = t("batches.error_quantity_invalid");
+    }
+    const cost = Number(form.total_cost);
+    if (form.total_cost === "" || Number.isNaN(cost) || cost < 0) {
+      errs.total_cost = t("batches.error_cost_invalid");
+    }
+    if (
+      form.expiry_date &&
+      form.manufacturing_date &&
+      form.expiry_date < form.manufacturing_date
+    ) {
+      errs.expiry_date = t("batches.error_expiry_before_manufacturing");
+    }
+    return errs;
+  };
 
   const generateBatchNumber = (p: Product | null): string => {
     if (!p?.sku) return "";
@@ -178,7 +220,7 @@ export default function BatchesPage() {
       .then((res) => {
         setData(res.data);
         setTotal(res.total);
-        if (res.value_at_risk != null) setValueAtRisk(res.value_at_risk);
+        if (res.summary) setSummary(res.summary);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -227,36 +269,49 @@ export default function BatchesPage() {
     setEditing(null);
     setForm(emptyForm);
     setSelectedProduct(null);
+    setFormErrors({});
+    setFormError(null);
     setSlideOpen(true);
   };
 
   const openEdit = (row: Record<string, unknown>) => {
     const b = row as unknown as ProductBatch;
     setEditing(b);
-      setForm({
-        product_id: String(b.product_id),
-        batch_number: b.batch_number,
-        quantity: String(b.quantity),
-        total_cost: String(b.total_cost ?? ((b.cost_per_unit ?? 0) * (b.quantity ?? 0))),
-        expiry_date: b.expiry_date?.slice(0, 10) ?? "",
-        manufacturing_date: b.manufacturing_date?.slice(0, 10) ?? "",
-        storage_location: b.storage_location ?? "",
-        source_type: b.source_type ?? "manual_entry",
-        supplier_id: b.supplier_id ? String(b.supplier_id) : "",
-      });
-    // index() eager-loads product:id,name,sku,unit, so the selector can label
-    // the current value immediately without waiting for a search.
+    setForm({
+      product_id: String(b.product_id),
+      batch_number: b.batch_number,
+      quantity: String(b.quantity),
+      total_cost: String(b.total_cost ?? ((b.cost_per_unit ?? 0) * (b.quantity ?? 0))),
+      expiry_date: b.expiry_date?.slice(0, 10) ?? "",
+      manufacturing_date: b.manufacturing_date?.slice(0, 10) ?? "",
+      storage_location: b.storage_location ?? "",
+      source_type: b.source_type ?? "manual_entry",
+      supplier_id: b.supplier_id ? String(b.supplier_id) : "",
+    });
+    // index() eager-loads product:id,name,sku,unit,has_batch, so the selector can
+    // label the current value immediately without waiting for a search.
     setSelectedProduct(b.product ?? null);
+    setFormErrors({});
+    setFormError(null);
     setSlideOpen(true);
   };
 
   const handleSave = async () => {
-    if (!token || !business || !form.batch_number) return;
+    if (!token || !business) return;
+    const errs = validateForm();
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
+      setFormError(t("batches.save_failed"));
+      setToast({ msg: t("batches.save_failed"), ok: false });
+      return;
+    }
     setSaving(true);
+    setFormErrors({});
+    setFormError(null);
     try {
       const payload = {
         product_id: Number(form.product_id),
-        batch_number: form.batch_number,
+        batch_number: form.batch_number.trim(),
         quantity: Number(form.quantity),
         total_cost: Number(form.total_cost),
         expiry_date: form.expiry_date || null,
@@ -273,8 +328,25 @@ export default function BatchesPage() {
         await ProductBatches.create(token, business.id, payload);
       }
       setSlideOpen(false);
+      setToast({ msg: editing ? t("batches.updated") : t("batches.created"), ok: true });
       fetchData();
-    } catch {
+    } catch (err) {
+      const apiError = err as ApiError;
+      const msg = apiError?.message || t("batches.save_failed");
+      const fieldErrors = mapFieldErrors(apiError, [
+        "product_id",
+        "batch_number",
+        "quantity",
+        "total_cost",
+        "expiry_date",
+        "manufacturing_date",
+        "supplier_id",
+      ]);
+      if (Object.keys(fieldErrors).length > 0) {
+        setFormErrors(fieldErrors);
+      }
+      setFormError(msg);
+      setToast({ msg, ok: false });
     } finally {
       setSaving(false);
     }
@@ -292,8 +364,10 @@ export default function BatchesPage() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <KPICard icon={AlertTriangle} label={t("batches.value_at_risk")} value={valueAtRisk} format="currency" accent="red" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <KPICard icon={Package} label={t("batches.active_inventory_value")} value={summary.active_value} format="currency" accent="emerald" />
+        <KPICard icon={AlertTriangle} label={t("batches.expiring_soon_value")} value={summary.expiring_soon_value} format="currency" accent="amber" />
+        <KPICard icon={CalendarX2} label={t("batches.expired_inventory_value")} value={summary.expired_value} format="currency" accent="red" />
       </div>
 
       <div className="mb-4">
@@ -324,6 +398,11 @@ export default function BatchesPage() {
 
       <SlideOver open={slideOpen} onClose={() => setSlideOpen(false)} title={editing ? t("batches.edit") : t("batches.create")}>
         <div className="space-y-4">
+          {formError && (
+            <p className="px-3 py-2.5 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400">
+              {formError}
+            </p>
+          )}
           <div>
             <label
               htmlFor="batch-product"
@@ -365,12 +444,19 @@ export default function BatchesPage() {
                     ? generateBatchNumber(product) || prev.batch_number
                     : prev.batch_number,
                 }));
+                setFormErrors((prev) => {
+                  if (!prev.product_id) return prev;
+                  const next = { ...prev };
+                  delete next.product_id;
+                  return next;
+                });
               }}
               placeholder={t("batches.select_product")}
               searchPlaceholder={t("products.search")}
               emptyLabel={t("products.empty")}
               loadingLabel={t("common.loading")}
             />
+            {fieldErr("product_id")}
           </div>
           <div>
             <label className="block text-sm font-medium text-muted mb-1.5">{t("batches.batch_number")}</label>
@@ -378,8 +464,9 @@ export default function BatchesPage() {
               type="text"
               value={form.batch_number}
               onChange={(e) => setForm((p) => ({ ...p, batch_number: e.target.value }))}
-              className="w-full px-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover transition-colors"
+              className={inputCls(formErrors.batch_number)}
             />
+            {fieldErr("batch_number")}
           </div>
           {!editing && (
             <div>
@@ -416,9 +503,10 @@ export default function BatchesPage() {
               min="0"
               value={form.quantity}
               onChange={(e) => setForm((p) => ({ ...p, quantity: e.target.value }))}
-              className="w-full px-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover transition-colors"
+              className={inputCls(formErrors.quantity)}
             />
-            {selectedProduct && <p className="text-xs text-muted mt-0.5">{isPiece ? t("batches.whole_numbers_only") : t("batches.decimal_allowed")}</p>}
+            {fieldErr("quantity")}
+            {!formErrors.quantity && selectedProduct && <p className="text-xs text-muted mt-0.5">{isPiece ? t("batches.whole_numbers_only") : t("batches.decimal_allowed")}</p>}
           </div>
           <div>
             <label className="block text-sm font-medium text-muted mb-1.5">{t("batches.total_cost")}</label>
@@ -428,34 +516,37 @@ export default function BatchesPage() {
               min="0"
               value={form.total_cost}
               onChange={(e) => setForm((p) => ({ ...p, total_cost: e.target.value }))}
-              className="w-full px-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover transition-colors"
+              className={inputCls(formErrors.total_cost)}
             />
+            {fieldErr("total_cost")}
             {Number(form.quantity) > 0 && Number(form.total_cost) > 0 && (
               <p className="text-xs text-muted mt-0.5">
                 {t("batches.unit_cost", { cost: formatCurrency(Number(form.total_cost) / Number(form.quantity)) })}
               </p>
             )}
           </div>
-          {showExpiry && (
+          {showBatchExpiry && (
             <div>
               <label className="block text-sm font-medium text-muted mb-1.5">{t("batches.expiry_date")}</label>
               <input
                 type="date"
                 value={form.expiry_date}
                 onChange={(e) => setForm((p) => ({ ...p, expiry_date: e.target.value }))}
-                className="w-full px-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover transition-colors"
+                className={inputCls(formErrors.expiry_date)}
               />
+              {fieldErr("expiry_date")}
             </div>
           )}
-          {showExpiry && (
+          {showBatchExpiry && (
             <div>
               <label className="block text-sm font-medium text-muted mb-1.5">{t("batches.manufactured_date")}</label>
               <input
                 type="date"
                 value={form.manufacturing_date}
                 onChange={(e) => setForm((p) => ({ ...p, manufacturing_date: e.target.value }))}
-                className="w-full px-4 py-2.5 bg-card/80 border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-border-hover transition-colors"
+                className={inputCls(formErrors.manufacturing_date)}
               />
+              {fieldErr("manufacturing_date")}
             </div>
           )}
           <div>
@@ -476,8 +567,9 @@ export default function BatchesPage() {
               </button>
             )}
             <button
+              type="button"
               onClick={handleSave}
-              disabled={saving || !form.batch_number}
+              disabled={saving}
               className={`py-2.5 bg-primary hover:bg-primary-light text-foreground rounded-xl text-sm font-medium transition-colors disabled:opacity-50 ${editing ? "flex-1" : "w-full"}`}
             >
               {saving ? t("common.saving") : editing ? t("batches.save") : t("batches.create_btn")}
@@ -545,26 +637,40 @@ export default function BatchesPage() {
 
       <ConfirmDialog
         open={deleteConfirmOpen}
-        onClose={() => setDeleteConfirmOpen(false)}
+        onClose={() => {
+          setDeleteConfirmOpen(false);
+          setDeleteError(null);
+        }}
         onConfirm={async () => {
           if (!token || !business || !editing) return;
           setDeleting(true);
+          setDeleteError(null);
           try {
             await ProductBatches.delete(token, business.id, editing.id);
             setSlideOpen(false);
             setDeleteConfirmOpen(false);
             setEditing(null);
+            setToast({ msg: t("batches.deleted"), ok: true });
             fetchData();
-          } catch {
+          } catch (err) {
+            const apiError = err as ApiError;
+            setDeleteError(apiError?.message || t("batches.delete_failed"));
           } finally {
             setDeleting(false);
           }
         }}
         title={t("batches.delete_title")}
         message={t("batches.delete_message", { batch: editing?.batch_number ?? "" })}
+        error={deleteError ?? undefined}
         confirmLabel={t("common.delete")}
         loading={deleting}
       />
+
+      {toast && (
+        <div className={`fixed top-4 end-4 z-[100] px-4 py-3 rounded-xl border text-sm font-medium shadow-lg ${toast.ok ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-red-500/10 border-red-500/30 text-red-400"}`}>
+          {toast.msg}
+        </div>
+      )}
     </motion.div>
   );
 }

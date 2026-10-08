@@ -322,6 +322,7 @@ class ReturnExchangeController extends Controller
         StockMovement::create([
             'business_id' => $businessId,
             'product_id' => $product->id,
+            'batch_id' => $batch?->id,
             'quantity' => $qty,
             'type' => 'addition',
             'reference_type' => $isExchange ? 'exchange_return' : 'sales_return',
@@ -434,7 +435,7 @@ class ReturnExchangeController extends Controller
                 $invoiceItem->update(['metadata' => ['deductions' => $deductions]]);
             }
 
-            StockMovement::create([
+            StockMovement::recordDeductions([
                 'business_id' => $businessId,
                 'product_id' => $product->id,
                 'from_warehouse_id' => $warehouseId,
@@ -443,7 +444,7 @@ class ReturnExchangeController extends Controller
                 'reference_type' => 'exchange_sale',
                 'reference_id' => $returnExchange->id,
                 'notes' => 'Exchange sale - '.$exchangeNumber,
-            ]);
+            ], $deductions);
         }
 
         $net = round($subtotal + $totalTax, 2);

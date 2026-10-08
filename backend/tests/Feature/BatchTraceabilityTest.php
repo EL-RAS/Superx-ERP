@@ -386,4 +386,283 @@ class BatchTraceabilityTest extends TestCase
         $show = $this->getJson('/api/v1/suppliers/'.$supplier->id)->assertOk()->json();
         $this->assertSame(-12.0, (float) $show['balance']);
     }
+
+    public function test_batch_store_rejects_zero_and_fractional_piece_quantity(): void
+    {
+        $product = $this->makeProduct();
+        $expiry = now()->addYear()->toDateString();
+
+        $this->postJson('/api/v1/product-batches', [
+            'product_id' => $product->id,
+            'batch_number' => 'ZERO-001',
+            'quantity' => 0,
+            'total_cost' => 0,
+            'expiry_date' => $expiry,
+        ])->assertStatus(422);
+
+        $piece = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Piece Batch Product',
+            'sku' => 'SKU-PIECE-BATCH',
+            'price' => 10,
+            'cost' => 4,
+            'unit' => 'pcs',
+            'has_batch' => false,
+            'is_active' => true,
+            'stock_quantity' => 0,
+        ]);
+
+        $fractional = $this->postJson('/api/v1/product-batches', [
+            'product_id' => $piece->id,
+            'batch_number' => 'FRAC-001',
+            'quantity' => 2.5,
+            'total_cost' => 10,
+            'expiry_date' => $expiry,
+        ]);
+        $fractional->assertStatus(422);
+        $fractional->assertJsonValidationErrors('quantity');
+
+        $this->assertSame(0, ProductBatch::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->count());
+    }
+
+    public function test_batch_store_rejects_expiry_before_manufacturing_date(): void
+    {
+        $product = $this->makeProduct();
+
+        $response = $this->postJson('/api/v1/product-batches', [
+            'product_id' => $product->id,
+            'batch_number' => 'DATES-001',
+            'quantity' => 5,
+            'total_cost' => 20,
+            'manufacturing_date' => now()->addMonth()->toDateString(),
+            'expiry_date' => now()->toDateString(),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('expiry_date');
+
+        $this->assertSame(0, ProductBatch::withoutGlobalScope(BusinessScope::class)
+            ->where('business_id', $this->business->id)
+            ->count());
+    }
+
+    public function test_batch_store_rejects_foreign_product_and_duplicate_number(): void
+    {
+        $product = $this->makeProduct();
+        $supplier = $this->makeSupplier();
+        $expiry = now()->addYear()->toDateString();
+
+        $foreignBusiness = Business::create([
+            'id' => (string) Str::uuid(),
+            'business_type_id' => $this->business->business_type_id,
+            'name' => 'Foreign Retail',
+            'slug' => 'foreign-retail',
+            'status' => 'active',
+        ]);
+        $foreignProduct = Product::create([
+            'business_id' => $foreignBusiness->id,
+            'created_by' => $this->user->id,
+            'name' => 'Foreign Product',
+            'sku' => 'SKU-FOREIGN',
+            'price' => 10,
+            'cost' => 4,
+            'has_batch' => true,
+            'is_active' => true,
+            'stock_quantity' => 0,
+        ]);
+
+        $foreign = $this->postJson('/api/v1/product-batches', [
+            'product_id' => $foreignProduct->id,
+            'batch_number' => 'FOREIGN-001',
+            'quantity' => 5,
+            'total_cost' => 20,
+            'expiry_date' => $expiry,
+        ]);
+        $foreign->assertStatus(422);
+        $foreign->assertJsonValidationErrors('product_id');
+
+        $this->postJson('/api/v1/product-batches', [
+            'product_id' => $product->id,
+            'batch_number' => 'DUP-001',
+            'supplier_id' => $supplier->id,
+            'quantity' => 5,
+            'total_cost' => 20,
+            'expiry_date' => $expiry,
+        ])->assertStatus(201);
+
+        $this->postJson('/api/v1/product-batches', [
+            'product_id' => $product->id,
+            'batch_number' => 'DUP-001',
+            'supplier_id' => $supplier->id,
+            'quantity' => 3,
+            'total_cost' => 12,
+            'expiry_date' => $expiry,
+        ])->assertStatus(422);
+    }
+
+    public function test_batch_update_can_clear_expiry_and_rejects_foreign_product(): void
+    {
+        $product = $this->makeProduct();
+        $batch = $this->makeBatch($product, $this->makeSupplier(), 5);
+
+        $cleared = $this->patchJson('/api/v1/product-batches/'.$batch->id, [
+            'expiry_date' => null,
+            'batch_number' => '  RENAMED-001  ',
+        ]);
+        $cleared->assertStatus(200);
+        $this->assertNull($batch->fresh()->expiry_date);
+        $this->assertSame('RENAMED-001', $batch->fresh()->batch_number);
+
+        $foreignBusiness = Business::create([
+            'id' => (string) Str::uuid(),
+            'business_type_id' => $this->business->business_type_id,
+            'name' => 'Foreign Retail Two',
+            'slug' => 'foreign-retail-two',
+            'status' => 'active',
+        ]);
+        $foreignProduct = Product::create([
+            'business_id' => $foreignBusiness->id,
+            'created_by' => $this->user->id,
+            'name' => 'Foreign Product Two',
+            'sku' => 'SKU-FOREIGN-2',
+            'price' => 10,
+            'cost' => 4,
+            'has_batch' => true,
+            'is_active' => true,
+            'stock_quantity' => 0,
+        ]);
+
+        $this->patchJson('/api/v1/product-batches/'.$batch->id, [
+            'product_id' => $foreignProduct->id,
+        ])->assertStatus(422)->assertJsonValidationErrors('product_id');
+    }
+
+    public function test_batch_destroy_remaining_stock_uses_exact_message(): void
+    {
+        $product = $this->makeProduct();
+        $batch = $this->makeBatch($product, $this->makeSupplier(), 5);
+
+        $response = $this->deleteJson('/api/v1/product-batches/'.$batch->id);
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'Cannot delete a batch with remaining stock. Please adjust the stock to zero before deleting.');
+        $this->assertNotNull($batch->fresh());
+    }
+
+    public function test_sale_and_void_stamp_batch_on_stock_movements(): void
+    {
+        $product = $this->makeProduct();
+        $batch = $this->makeBatch($product, $this->makeSupplier(), 10);
+
+        $sale = $this->postJson('/api/v1/invoices', [
+            'payment_method' => 'cash',
+            'payment_status' => 'paid',
+            'items' => [
+                [
+                    'product_id' => $product->id,
+                    'name' => 'Traced Sale',
+                    'quantity' => 3,
+                    'unit_price' => 10,
+                    'tax_rate' => 0,
+                ],
+            ],
+        ]);
+        $sale->assertStatus(201);
+        $invoiceId = $sale->json('id');
+
+        $this->assertDatabaseHas('stock_movements', [
+            'business_id' => $this->business->id,
+            'product_id' => $product->id,
+            'batch_id' => $batch->id,
+            'reference_type' => 'invoice',
+            'reference_id' => $invoiceId,
+            'type' => 'reduction',
+        ]);
+
+        $this->postJson('/api/v1/invoices/'.$invoiceId.'/void')->assertStatus(200);
+
+        $this->assertDatabaseHas('stock_movements', [
+            'business_id' => $this->business->id,
+            'product_id' => $product->id,
+            'batch_id' => $batch->id,
+            'reference_type' => 'invoice_void',
+            'reference_id' => $invoiceId,
+            'type' => 'addition',
+        ]);
+    }
+
+    public function test_manual_batch_on_simple_product_keeps_product_stock_intact(): void
+    {
+        $product = Product::create([
+            'business_id' => $this->business->id,
+            'created_by' => $this->user->id,
+            'name' => 'Simple Stock Product',
+            'sku' => 'SKU-SIMPLE-STOCK',
+            'price' => 10,
+            'cost' => 4,
+            'has_batch' => false,
+            'is_active' => true,
+            'stock_quantity' => 7,
+        ]);
+
+        $batch = $this->postJson('/api/v1/product-batches', [
+            'product_id' => $product->id,
+            'batch_number' => 'SIMPLE-001',
+            'quantity' => 4,
+            'total_cost' => 16,
+            'expiry_date' => now()->addYear()->toDateString(),
+        ]);
+
+        $batch->assertStatus(201);
+        $this->assertSame('7.00', $product->fresh()->stock_quantity);
+
+        $this->patchJson('/api/v1/product-batches/'.$batch->json('id'), ['quantity' => 0])->assertStatus(200);
+        $this->deleteJson('/api/v1/product-batches/'.$batch->json('id'))->assertStatus(200);
+        $this->assertSame('7.00', $product->fresh()->stock_quantity);
+    }
+
+    public function test_batch_index_summary_breaks_down_inventory_value(): void
+    {
+        $product = $this->makeProduct();
+        $supplier = $this->makeSupplier();
+
+        // Healthy stock (beyond the warning window): 10 x 2.00 = 20 (active only).
+        $this->makeBatch($product, $supplier, 10, 2.0)->forceFill(['expiry_date' => now()->addDays(90)->toDateString()])->save();
+
+        // Expiring soon: 5 x 4.00 = 20 (expiring + active).
+        $this->makeBatch($product, $supplier, 5, 4.0)->forceFill(['expiry_date' => now()->addDays(10)->toDateString()])->save();
+
+        // Expired: 8 x 1.50 = 12 (expired only).
+        $this->makeBatch($product, $supplier, 8, 1.5)->forceFill(['expiry_date' => now()->subDays(5)->toDateString()])->save();
+
+        // No expiry: 3 x 10.00 = 30 (active only, null expiry is healthy stock).
+        $this->makeBatch($product, $supplier, 3, 10.0)->forceFill(['expiry_date' => null])->save();
+
+        // Partly sold, expiring soon: remaining 4 x 2.00 = 8 (expiring + active).
+        $this->makeBatch($product, $supplier, 10, 2.0)->forceFill([
+            'quantity_sold' => 6,
+            'expiry_date' => now()->addDays(20)->toDateString(),
+        ])->save();
+
+        // Fully sold, expired: no remaining stock, must NOT be valued.
+        $this->makeBatch($product, $supplier, 4, 5.0)->forceFill([
+            'quantity_sold' => 4,
+            'expiry_date' => now()->subDays(2)->toDateString(),
+        ])->save();
+
+        // Expired, sold 2 + returned 1: remaining 7 x 3.00 = 21 (expired only).
+        $this->makeBatch($product, $supplier, 10, 3.0)->forceFill([
+            'quantity_sold' => 2,
+            'quantity_returned' => 1,
+            'expiry_date' => now()->subDays(3)->toDateString(),
+        ])->save();
+
+        $this->getJson('/api/v1/product-batches')
+            ->assertOk()
+            ->assertJsonPath('summary.active_value', 78)
+            ->assertJsonPath('summary.expiring_soon_value', 28)
+            ->assertJsonPath('summary.expired_value', 33);
+    }
 }

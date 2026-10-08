@@ -159,19 +159,21 @@ class InvoiceController extends Controller
                                 $businessId = $request->user()->business_id;
                                 $deductions = StockService::deductForSale($product, (float) $item['quantity'], $businessId, $allowNegativeStock);
 
-                                if ($product->has_batch) {
-                                    $invoiceItem = InvoiceItem::where('invoice_id', $invoice->id)
-                                        ->where('product_id', $item['product_id'])
-                                        ->latest('id')
-                                        ->first();
-                                    if ($invoiceItem) {
-                                        $invoiceItem->update([
-                                            'metadata' => array_merge($invoiceItem->metadata ?? [], ['deductions' => $deductions]),
-                                        ]);
-                                    }
+                                // Persist the frozen cost of every deducted unit -
+                                // batch and simple alike - so the 5010 COGS leg is
+                                // booked from what the goods actually cost, never
+                                // from a cost that changed later.
+                                $invoiceItem = InvoiceItem::where('invoice_id', $invoice->id)
+                                    ->where('product_id', $item['product_id'])
+                                    ->latest('id')
+                                    ->first();
+                                if ($invoiceItem) {
+                                    $invoiceItem->update([
+                                        'metadata' => array_merge($invoiceItem->metadata ?? [], ['deductions' => $deductions]),
+                                    ]);
                                 }
 
-                                StockMovement::create([
+                                StockMovement::recordDeductions([
                                     'business_id' => $request->user()->business_id,
                                     'product_id' => $item['product_id'],
                                     'from_warehouse_id' => $defaultWarehouseId,
@@ -180,7 +182,7 @@ class InvoiceController extends Controller
                                     'reference_type' => 'invoice',
                                     'reference_id' => $invoice->id,
                                     'notes' => 'Sale - '.$invoiceNumber,
-                                ]);
+                                ], $deductions);
                             }
                         }
                     }
@@ -514,6 +516,11 @@ class InvoiceController extends Controller
 
             $invoice->update(['payment_status' => $validated['payment_status']]);
 
+            // Capture the COGS the recognition entry currently carries before
+            // stock moves, so a late "mark as paid" can be spotted as a COGS
+            // correction and the entry reposted (see below).
+            $cogsBefore = $invoice->status !== 'void' ? $accounting->invoiceCogs($invoice) : 0.0;
+
             // Deduct stock first (recording batch-exact FEFO deduction metadata)
             // so the recognition entry below carries the correct COGS.
             if ($validated['payment_status'] === 'paid') {
@@ -533,12 +540,10 @@ class InvoiceController extends Controller
                         if (! $alreadyDeducted) {
                             $product = Product::findOrFail($item->product_id);
                             $deductions = StockService::deductForSale($product, (float) $item->quantity, $businessId, $allowNegativeStock);
-                            if ($product->has_batch) {
-                                $item->update([
-                                    'metadata' => array_merge($item->metadata ?? [], ['deductions' => $deductions]),
-                                ]);
-                            }
-                            StockMovement::create([
+                            $item->update([
+                                'metadata' => array_merge($item->metadata ?? [], ['deductions' => $deductions]),
+                            ]);
+                            StockMovement::recordDeductions([
                                 'business_id' => $businessId,
                                 'product_id' => $item->product_id,
                                 'from_warehouse_id' => $warehouseId,
@@ -547,7 +552,7 @@ class InvoiceController extends Controller
                                 'reference_type' => 'invoice',
                                 'reference_id' => $invoice->id,
                                 'notes' => 'Stock deduction - status changed to paid',
-                            ]);
+                            ], $deductions);
                         }
                     }
                 }
@@ -557,6 +562,15 @@ class InvoiceController extends Controller
             // (Dr 1040 / Cr 4010 / Cr 2020) regardless of status.
             if ($invoice->status !== 'void') {
                 $accounting->postSaleEntry($businessId, $invoice, $request->user()->id);
+
+                // Stock only just moved (or the product's cost changed since
+                // the invoice was raised): if the frozen deductions now price
+                // the sale differently from the entry already on file, reverse
+                // it and repost so 5010/1030 match reality.
+                if (abs($accounting->invoiceCogs($invoice) - $cogsBefore) > 0.005
+                    && $accounting->hasEntry($businessId, 'sale', $invoice->id)) {
+                    $accounting->repostSaleEntry($businessId, $invoice, $request->user()->id);
+                }
             }
 
             // Clear the receivable for the remaining balance when the invoice

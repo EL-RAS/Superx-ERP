@@ -95,13 +95,19 @@ class ProductImportService
                 // imported quantity must be backed by a real batch row or
                 // checkout fails with "Insufficient batch stock".
                 if ($importedStock > 0) {
-                    $this->provisionInitialBatch(
+                    $batch = $this->provisionInitialBatch(
                         $product,
                         $businessId,
                         $importedStock,
                         (float) ($row['cost_price'] ?? 0),
                         (float) ($row['selling_price'] ?? 0),
                     );
+
+                    // Recognise the imported stock on the ledger (Dr 1030 /
+                    // Cr 3010) so the Inventory Asset account stays in parity
+                    // with actual on-hand value without waiting for a sync run.
+                    app(AccountingService::class)
+                        ->postImportOpeningStockEntry($businessId, $batch, $userId);
                 }
 
                 // Re-sync product stock to the batch total so the invariant
@@ -111,6 +117,11 @@ class ProductImportService
 
             return [$created, $updated];
         });
+
+        // Background self-healing: whatever the inline per-batch posts did not
+        // fully capture (e.g. legacy batches, edge-case costs), the queued
+        // reconcile closes so 1030 stays at parity with the real valuation.
+        app(InventorySyncService::class)->queueReconcile($businessId, $userId);
 
         return [
             'created' => $imported[0],
@@ -125,13 +136,13 @@ class ProductImportService
      * (an existing batch or a re-import of the same product gets the next
      * suffix, keeping the [business_id, product_id, batch_number] unique key).
      */
-    protected function provisionInitialBatch(Product $product, string $businessId, float $quantity, float $costPerUnit, float $sellingPrice): void
+    protected function provisionInitialBatch(Product $product, string $businessId, float $quantity, float $costPerUnit, float $sellingPrice): ProductBatch
     {
         $existing = ProductBatch::withTrashed()
             ->where('product_id', $product->id)
             ->count();
 
-        ProductBatch::create([
+        return ProductBatch::create([
             'business_id' => $businessId,
             'product_id' => $product->id,
             'batch_number' => sprintf('IMP-INIT-%s-%d', $product->id, $existing + 1),

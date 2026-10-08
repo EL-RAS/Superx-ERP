@@ -7,6 +7,7 @@ use App\Models\Business;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductBatch;
+use App\Services\AccountingService;
 use App\Services\ProductExportService;
 use App\Services\ProductImportService;
 use Illuminate\Http\JsonResponse;
@@ -489,7 +490,7 @@ class ProductController extends Controller
 
             // Back the unit with a real batch so POS / FEFO deduction can
             // actually sell it (otherwise "Insufficient batch stock").
-            ProductBatch::create([
+            $batch = ProductBatch::create([
                 'business_id' => $product->business_id,
                 'product_id' => $product->id,
                 'batch_number' => 'IMP-INIT-'.$product->id.'-1',
@@ -500,6 +501,8 @@ class ProductController extends Controller
                 'received_date' => now()->toDateString(),
                 'is_active' => true,
             ]);
+            app(AccountingService::class)
+                ->postImportOpeningStockEntry($product->business_id, $batch, $request->user()->id);
             $product->recalculateStockQuantity();
             DB::commit();
 

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Exceptions\InsufficientStockException;
+use App\Scopes\BusinessScope;
 use App\Services\NotificationService;
 use App\Traits\BelongsToBusiness;
 use Illuminate\Database\Eloquent\Model;
@@ -107,18 +108,48 @@ class ProductBatch extends Model
         return (float) $this->quantity - (float) $this->quantity_sold;
     }
 
+    /**
+     * Sellable batches for a product, in picking order.
+     *
+     * The default inventory costing method is FEFO (first expired, first out):
+     * the soonest-expiring stock leaves the shelf first. A business that
+     * switches `inventory_costing_method` to `fifo` picks the oldest receipt
+     * first instead - the same order the goods-receipt cost stack for a
+     * non-batched product is drawn from, so both product shapes cost the same
+     * way.
+     */
     public static function getAvailableFefoBatches(int $productId, string $businessId): Collection
     {
-        return static::where('product_id', $productId)
+        $query = static::where('product_id', $productId)
             ->where('business_id', $businessId)
             ->whereRaw('(quantity - quantity_sold) > 0')
             ->where(function ($q) {
                 $q->whereNull('expiry_date')
                     ->orWhere('expiry_date', '>=', now());
-            })
-            ->orderBy('expiry_date', 'asc')
-            ->orderBy('id', 'asc')
-            ->get();
+            });
+
+        if (static::costingMethod($businessId) === 'fifo') {
+            $query->orderByRaw('received_date IS NULL')
+                ->orderBy('received_date', 'asc')
+                ->orderBy('id', 'asc');
+        } else {
+            $query->orderBy('expiry_date', 'asc')
+                ->orderBy('id', 'asc');
+        }
+
+        return $query->get();
+    }
+
+    /**
+     * The business's inventory costing method: `fefo` (first expired, first
+     * out - the default) or `fifo` (first in, first out by receipt date).
+     */
+    public static function costingMethod(string $businessId): string
+    {
+        $business = Business::withoutGlobalScope(BusinessScope::class)->find($businessId);
+        $method = $business?->mergedSettings()['inventory_costing_method'] ?? 'fefo';
+
+        return $method === 'fifo' ? 'fifo' : 'fefo';
     }
 
     public static function getAvailableFefoStock(int $productId, string $businessId): float

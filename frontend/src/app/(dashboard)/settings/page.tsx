@@ -36,6 +36,7 @@ const ERROR_FIELDS = [
   "receipt_footer_message",
   "scale_barcode_prefix",
   "expiry_warning_days",
+  "inventory_costing_method",
 ] as const;
 
 const numberBase = (full: string): string => {
@@ -81,6 +82,7 @@ export default function SettingsPage() {
   const [scaleBarcodeParsing, setScaleBarcodeParsing] = useState(false);
   const [scaleBarcodePrefix, setScaleBarcodePrefix] = useState("20");
   const [expiryWarningDays, setExpiryWarningDays] = useState("30");
+  const [inventoryCostingMethod, setInventoryCostingMethod] = useState<"fefo" | "fifo">("fefo");
   const [nextNumbers, setNextNumbers] = useState<DocumentNumbers>({
     sales_invoice: "INV-1",
     purchase_order: "PO-1",
@@ -128,6 +130,7 @@ export default function SettingsPage() {
         setScaleBarcodeParsing(s.scale_barcode_parsing === true);
         setScaleBarcodePrefix((s.scale_barcode_prefix as string) || "20");
         setExpiryWarningDays(String(s.expiry_warning_days ?? "30"));
+        setInventoryCostingMethod(s.inventory_costing_method === "fifo" ? "fifo" : "fefo");
         setNextNumbers(res.next_numbers);
       })
       .catch(() => {})
@@ -211,6 +214,7 @@ export default function SettingsPage() {
         scale_barcode_parsing: scaleBarcodeParsing,
         scale_barcode_prefix: scaleBarcodeParsing ? scaleBarcodePrefix.trim() || null : null,
         expiry_warning_days: Number(expiryWarningDays),
+        inventory_costing_method: inventoryCostingMethod,
       });
       if (config) setConfig({ ...config, settings: updated.settings, business_name: updated.business_name });
       if (user) setUser({ ...user, name: updated.user.name, email: updated.user.email });
@@ -574,6 +578,17 @@ export default function SettingsPage() {
               </div>
               <p className="text-xs text-muted mt-1.5">{t("settings.expiry_warning_days_desc")}</p>
               {fieldError("expiry_warning_days")}
+            </div>
+            <div>
+              <label className="text-xs text-muted uppercase tracking-wider block mb-1.5">{t("settings.inventory_costing_method")}</label>
+              <select value={inventoryCostingMethod}
+                onChange={(e) => { setInventoryCostingMethod(e.target.value as "fefo" | "fifo"); setErrors((p) => ({ ...p, inventory_costing_method: "" })); }}
+                className={inputClass(errors.inventory_costing_method)}>
+                <option value="fefo">{t("settings.costing_fefo")}</option>
+                <option value="fifo">{t("settings.costing_fifo")}</option>
+              </select>
+              <p className="text-xs text-muted mt-1.5">{t("settings.inventory_costing_method_desc")}</p>
+              {fieldError("inventory_costing_method")}
             </div>
           </div>
         </div>

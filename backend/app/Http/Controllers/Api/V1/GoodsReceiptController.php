@@ -16,6 +16,7 @@ use App\Rules\ProductQuantity;
 use App\Scopes\BusinessScope;
 use App\Services\AccountingService;
 use App\Services\DocumentNumberService;
+use App\Services\InventorySyncService;
 use App\Services\ProductProvisioner;
 use App\Services\SupplierLedgerService;
 use Illuminate\Http\JsonResponse;
@@ -363,6 +364,9 @@ class GoodsReceiptController extends Controller
             }
 
             $receipt->load(['purchaseOrder:id,order_number', 'supplier:id,name', 'user:id,name', 'items']);
+
+            app(InventorySyncService::class)
+                ->queueReconcile($businessId, $request->user()->id);
 
             return response()->json($receipt, 201);
         });

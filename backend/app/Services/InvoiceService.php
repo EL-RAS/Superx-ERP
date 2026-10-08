@@ -130,6 +130,7 @@ class InvoiceService
             }
 
             $qty = (float) $item->quantity;
+            $restored = [];
 
             if ($product->has_batch) {
                 $deductions = $item->metadata['deductions'] ?? null;
@@ -140,15 +141,33 @@ class InvoiceService
                             continue;
                         }
                         $batch->decrement('quantity_sold', (float) $deduction['quantity']);
+                        $restored[] = [
+                            'batch_id' => $batch->id,
+                            'batch_number' => $batch->batch_number,
+                            'quantity' => (float) $deduction['quantity'],
+                        ];
                     }
                 } else {
-                    $batch = ProductBatch::where('product_id', $product->id)
-                        ->where('is_active', true)
-                        ->orderBy('expiry_date')
-                        ->orderBy('id')
-                        ->first();
+                    $batchQuery = ProductBatch::where('product_id', $product->id)
+                        ->where('is_active', true);
+
+                    if (ProductBatch::costingMethod($businessId) === 'fifo') {
+                        $batchQuery->orderByRaw('received_date IS NULL')
+                            ->orderBy('received_date')
+                            ->orderBy('id');
+                    } else {
+                        $batchQuery->orderBy('expiry_date')
+                            ->orderBy('id');
+                    }
+
+                    $batch = $batchQuery->first();
                     if ($batch) {
                         $batch->increment('quantity', $qty);
+                        $restored[] = [
+                            'batch_id' => $batch->id,
+                            'batch_number' => $batch->batch_number,
+                            'quantity' => $qty,
+                        ];
                     }
                 }
 
@@ -158,7 +177,7 @@ class InvoiceService
                 $product->increment('stock_quantity', $qty);
             }
 
-            StockMovement::create([
+            StockMovement::recordDeductions([
                 'business_id' => $businessId,
                 'product_id' => $item->product_id,
                 'quantity' => $qty,
@@ -166,7 +185,7 @@ class InvoiceService
                 'reference_type' => 'invoice_void',
                 'reference_id' => $invoice->id,
                 'notes' => 'Void - '.$invoice->invoice_number,
-            ]);
+            ], $restored);
         }
     }
 }

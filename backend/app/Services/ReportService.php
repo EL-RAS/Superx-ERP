@@ -226,12 +226,14 @@ class ReportService
     public function stockValuation(): array
     {
         $products = Product::with(['batches' => function ($q) {
-            $q->where(function ($qq) {
-                $qq->whereNull('expiry_date')
-                    ->orWhere('expiry_date', '>=', now());
-            })->whereRaw('(quantity - quantity_sold) > 0');
+            $q->where('is_active', true)
+                ->where(function ($qq) {
+                    $qq->whereNull('expiry_date')
+                        ->orWhere('expiry_date', '>=', now());
+                })->whereRaw('(quantity - quantity_sold) > 0');
         }])->get();
 
+        $valuation = app(InventoryValuationService::class);
         $rows = [];
         $totalUnits = 0;
         $totalValue = 0;
@@ -239,15 +241,15 @@ class ReportService
         foreach ($products as $product) {
             if ($product->has_batch) {
                 $quantity = (float) $product->batches->sum(fn ($b) => (float) $b->quantity - (float) $b->quantity_sold);
-                $value = (float) $product->batches->sum(fn ($b) => ((float) $b->quantity - (float) $b->quantity_sold) * (float) $b->cost_per_unit);
             } else {
                 $quantity = (float) $product->stock_quantity;
-                $value = $quantity * (float) $product->cost;
             }
 
             if ($quantity <= 0.001) {
                 continue;
             }
+
+            $value = $valuation->productValue($product->business_id, $product);
 
             $value = round($value, 2);
             $totalUnits += $quantity;

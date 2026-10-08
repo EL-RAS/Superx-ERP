@@ -10,6 +10,7 @@ use App\Models\JournalEntry;
 use App\Models\JournalEntryLine;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductBatch;
 use App\Models\PurchaseOrderPayment;
 use App\Models\ReturnExchange;
 use App\Models\Shift;
@@ -566,6 +567,41 @@ class AccountingService
     }
 
     /**
+     * Bulk import / quick-add: opening stock brought in without a supplier
+     * document. Debit 1030 Inventory Asset (quantity × cost per unit), credit
+     * 3010 Owner's Capital — the same equity account the opening-balance
+     * seeder and inventory:sync-accounting offset against, so imported stock
+     * is recognised on the ledger the moment it lands instead of waiting for a
+     * reconciliation run. Idempotent per batch (one entry per IMP-INIT batch).
+     */
+    public function postImportOpeningStockEntry(string $businessId, ProductBatch $batch, ?int $userId = null): ?JournalEntry
+    {
+        $amount = round((float) $batch->total_cost, 2);
+        if ($amount <= 0) {
+            return null;
+        }
+
+        $date = $batch->received_date?->toDateString() ?? now()->toDateString();
+
+        return $this->postIfNeeded($businessId, [
+            'date' => $date,
+            'description' => 'Import Opening Stock - Batch: '.$batch->batch_number,
+            'reference_type' => 'import_opening_stock',
+            'reference_id' => $batch->id,
+            'user_id' => $userId,
+            'metadata' => [
+                'product_id' => $batch->product_id,
+                'batch_id' => $batch->id,
+                'quantity' => (float) $batch->quantity,
+                'cost_per_unit' => (float) $batch->cost_per_unit,
+            ],
+        ], [
+            ['code' => '1030', 'debit' => $amount, 'description' => 'Import opening stock - '.$batch->batch_number],
+            ['code' => '3010', 'credit' => $amount, 'description' => 'Import opening stock - '.$batch->batch_number],
+        ]);
+    }
+
+    /**
      * Purchases: supplier payment → Dr 2010, Cr 1005 (cash) or 1020 (bank/card).
      */
     public function postSupplierPaymentEntry(string $businessId, PurchaseOrderPayment $payment, ?int $userId = null): ?JournalEntry
@@ -857,9 +893,9 @@ class AccountingService
      * invoice_items.metadata['deductions'] at stock-deduction time
      * ([['batch_id'=>…,'unit_cost'=>…,'quantity'=>…]]). When deduction metadata
      * is missing (e.g. invoices created before the feature), falls back to the
-     * product cost × quantity.
+     * product cost A- quantity.
      */
-    private function invoiceCogs(Invoice $invoice): float
+    public function invoiceCogs(Invoice $invoice): float
     {
         if (! $invoice->relationLoaded('items')) {
             $invoice->load('items');

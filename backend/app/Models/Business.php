@@ -210,6 +210,7 @@ class Business extends Model
             'scale_barcode_parsing' => false,
             'scale_barcode_prefix' => '20',
             'expiry_warning_days' => 30,
+            'inventory_costing_method' => 'fefo',
         ];
 
         $typeDefaults = $this->businessType?->default_settings ?? [];

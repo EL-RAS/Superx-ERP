@@ -2,13 +2,23 @@
 
 namespace App\Services;
 
+use App\Jobs\ReconcileInventoryAccounting;
 use App\Models\JournalEntryLine;
-use App\Models\Product;
-use App\Models\ProductBatch;
 use App\Scopes\BusinessScope;
 
 class InventorySyncService
 {
+    /**
+     * Queue a background self-healing reconciliation for a business. Called
+     * after any flow that can move stock (bulk import, GRN, manual batch add)
+     * so a drift between the 1030 ledger balance and the real on-hand valuation
+     * is closed automatically without blocking the request that triggered it.
+     */
+    public function queueReconcile(string $businessId, ?int $userId = null): void
+    {
+        ReconcileInventoryAccounting::dispatch($businessId, $userId);
+    }
+
     /**
      * Reconcile the 1030 Inventory Asset account with the actual on-hand stock
      * value for a business. Posts a balanced opening-balance entry for the
@@ -18,39 +28,15 @@ class InventorySyncService
      * @return array{ok: bool, changed: bool, stock_value: float, current_balance: float, delta: float, new_balance?: float, entry_id?: int, message: string}
      */
     /**
-     * Total on-hand stock value for a business:
-     *   - batch-managed products: Σ remaining active non-expired batch qty × cost_per_unit
-     *   - simple products: stock_quantity × cost
+     * Total on-hand stock value for a business. Delegates to
+     * InventoryValuationService so the figure the ledger is reconciled to is
+     * the very same figure the stock-valuation report prints: batch stock at
+     * exact batch cost, simple stock at the cost of the goods-receipt layers
+     * that are actually still on the shelf.
      */
     public function stockValue(string $businessId): float
     {
-        return round(
-            Product::withoutGlobalScope(BusinessScope::class)
-                ->where('business_id', $businessId)
-                ->where('is_active', true)
-                ->get()
-                ->sum(function (Product $product) use ($businessId) {
-                    if (! $product->has_batch) {
-                        return round((float) $product->stock_quantity * (float) $product->cost, 2);
-                    }
-
-                    return ProductBatch::withoutGlobalScope(BusinessScope::class)
-                        ->where('business_id', $businessId)
-                        ->where('product_id', $product->id)
-                        ->where('is_active', true)
-                        ->where(function ($q) {
-                            $q->whereNull('expiry_date')
-                                ->orWhere('expiry_date', '>=', now());
-                        })
-                        ->whereRaw('(quantity - quantity_sold) > 0')
-                        ->get()
-                        ->sum(fn (ProductBatch $batch) => round(
-                            (float) ($batch->quantity - $batch->quantity_sold) * (float) $batch->cost_per_unit,
-                            2
-                        ));
-                }),
-            2
-        );
+        return app(InventoryValuationService::class)->stockValue($businessId);
     }
 
     public function sync(string $businessId, ?int $userId = null, bool $dryRun = false): array
